@@ -1,0 +1,13 @@
+[workspace]
+resolver = "2"
+members = [
+    "browser-core",
+    "browser-layout",
+    "browser-config",
+    "browser-runtime",
+    "browser-ui",
+    "webview-cdp",
+    "cef-sys",
+    "webview-cef",
+]
+
