@@ -16,3 +16,21 @@ version = "0.1.0"
 edition = "2024"
 license = "GPL-3.0-or-later"
 
+[workspace.dependencies]
+browser-core = { path = "browser-core" }
+browser-layout = { path = "browser-layout" }
+browser-config = { path = "browser-config" }
+browser-runtime = { path = "browser-runtime" }
+webview-cdp = { path = "webview-cdp" }
+cef-sys = { path = "cef-sys" }
+webview-cef = { path = "webview-cef" }
+gpui = "0.2.2"
+image = "0.25"
+smallvec = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+mlua = { version = "0.10", features = ["lua54", "vendored", "send", "serialize"] }
+notify = "8"
+anyhow = "1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", default-features = false, features = ["std", "alloc", "registry"] }
