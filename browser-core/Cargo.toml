@@ -1,0 +1,9 @@
+[package]
+name = "browser-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+serde.workspace = true
+tracing.workspace = true
