@@ -16,3 +16,8 @@ use std::time::Duration;
 pub const DEFAULT_CONFIG_DIR: &str = ".config/strip-browser";
 pub const DEFAULT_CONFIG_FILE: &str = "browser.lua";
 
+// ---------------------------------------------------------------------------
+// Typed config
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
