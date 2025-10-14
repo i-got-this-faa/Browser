@@ -21,3 +21,14 @@ pub const DEFAULT_CONFIG_FILE: &str = "browser.lua";
 // ---------------------------------------------------------------------------
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Theme {
+    pub bg: String,
+    pub bar: String,
+    pub bar_text: String,
+    pub border: String,
+    pub border_focus: String,
+    pub prompt_bg: String,
+    pub prompt_text: String,
+    pub accent: String,
+}
+
