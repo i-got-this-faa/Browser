@@ -1,0 +1,8 @@
+[package]
+name = "browser-layout"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+browser-core.workspace = true
