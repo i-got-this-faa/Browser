@@ -32,3 +32,19 @@ pub struct Theme {
     pub accent: String,
 }
 
+impl Default for Theme {
+    fn default() -> Self {
+        Self {
+            bg: "#101014".into(),
+            bar: "#0c0c10".into(),
+            bar_text: "#9aa0b0".into(),
+            border: "#2a2c3a".into(),
+            border_focus: "#7aa2f7".into(),
+            prompt_bg: "#1c1d27".into(),
+            prompt_text: "#e6e9f0".into(),
+            accent: "#7aa2f7".into(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
