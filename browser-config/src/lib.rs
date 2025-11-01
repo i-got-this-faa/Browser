@@ -48,3 +48,18 @@ impl Default for Theme {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Behavior {
+    /// Fraction of the viewport occupied by one page.
+    pub page_width_fraction: f32,
+    /// Gap between pages, virtual px.
+    pub gap: f32,
+    /// URL for `page.new` and first launch.
+    pub home_page: String,
+    /// Search URL with a `{}` placeholder for the query.
+    pub search_engine_url: String,
+    /// Smooth-scroll fraction per frame (higher = faster).
+    pub smooth_scroll: f32,
+    pub show_page_bar: bool,
+    pub show_status_bar: bool,
+}
+
