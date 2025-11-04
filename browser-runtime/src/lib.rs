@@ -17,3 +17,4 @@ pub use bridge::{BrowserSnapshot, HostEvent, TabInfo};
 pub use mlua::Value as LuaValue;
 pub use state::{BrowserState, PageSlot};
 
+// ---------------------------------------------------------------------------
