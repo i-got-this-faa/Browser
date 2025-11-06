@@ -23,3 +23,27 @@ pub type WebViewId = u64;
 
 /// Commands the shell can send to a web surface.
 #[derive(Debug, Clone)]
+pub enum WebViewCommand {
+    Navigate(String),
+    Reload,
+    /// Reload bypassing the HTTP cache (Page.reload ignoreCache).
+    HardReload,
+    GoBack,
+    GoForward,
+    Resize { width: u32, height: u32 },
+    Mouse { x: i32, y: i32, kind: MouseKind, button: MouseButton, mods: InputMods },
+    Scroll { x: i32, y: i32, dx: i32, dy: i32 },
+    Keys(Vec<KeyInput>),
+    SetFocus(bool),
+    /// Background pages must not composite (DoD). No-op on the frozen CDP
+    /// harness; CEF maps this to CefBrowserHost::WasHidden.
+    SetHidden(bool),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MouseKind { Down, Up, Move }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MouseButton { Left, Middle, Right }
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
