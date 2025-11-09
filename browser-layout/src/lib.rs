@@ -23,3 +23,10 @@ impl Viewport {
 pub type ScrollOffset = f32;
 
 /// Center the viewport on a page's slot, clamped to the strip edges.
+pub fn scroll_to_page(strip: &Strip, vp: &Viewport, id: PageId) -> ScrollOffset {
+    let Some(p) = strip.page(id) else { return 0.0 };
+    let center = p.x + p.width / 2.0;
+    (center - vp.width / 2.0).max(0.0)
+}
+
+/// Center the viewport on the active page.
