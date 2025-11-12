@@ -63,3 +63,18 @@ pub struct Behavior {
     pub show_status_bar: bool,
 }
 
+impl Default for Behavior {
+    fn default() -> Self {
+        Self {
+            page_width_fraction: 0.78,
+            gap: 12.0,
+            home_page: "https://duckduckgo.com".into(),
+            search_engine_url: "https://duckduckgo.com/?q={}".into(),
+            smooth_scroll: 0.18,
+            show_page_bar: true,
+            show_status_bar: true,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
