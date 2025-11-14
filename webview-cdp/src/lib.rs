@@ -47,3 +47,10 @@ pub enum MouseKind { Down, Up, Move }
 pub enum MouseButton { Left, Middle, Right }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct InputMods {
+    pub ctrl: bool,
+    pub alt: bool,
+    pub shift: bool,
+    pub meta: bool,
+}
+
