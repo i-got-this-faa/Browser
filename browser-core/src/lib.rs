@@ -39,3 +39,18 @@ pub struct Workspace {
 
 /// The single source of truth for strip geometry.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Strip {
+    pub pages: Vec<Page>,
+    pub workspaces: Vec<Workspace>,
+    pub active_workspace: WorkspaceId,
+    pub active_page: Option<PageId>,
+    pub next_id: PageId,
+    /// Gap between pages, virtual px.
+    pub gap: f32,
+    /// Fraction of the viewport a page occupies.
+    pub page_fraction: f32,
+}
+
+pub const DEFAULT_PAGE_FRACTION: f32 = 0.78;
+pub const DEFAULT_GAP: f32 = 12.0;
+
