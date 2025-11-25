@@ -17,3 +17,13 @@ use std::collections::HashMap;
 use browser_layout::{frame_geometries_scaled, scroll_step, Viewport};
 use browser_runtime::{ops, BrowserState, LuaHost, Request};
 use engine::EngineController;
+use gpui::{
+    div, img, prelude::*, px, relative, size, App, Application, Bounds, Context, FocusHandle,
+    Focusable, ImageSource, KeyDownEvent, MouseButton, MouseDownEvent, MouseMoveEvent,
+    MouseUpEvent, ObjectFit, Pixels, Point, Render, RenderImage, ScrollWheelEvent, SharedString,
+    Window, WindowBounds, WindowOptions,
+};
+use std::sync::Arc;
+
+pub const DEFAULT_LUA: &str = include_str!("../assets/browser.lua");
+
