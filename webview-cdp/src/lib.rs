@@ -54,3 +54,16 @@ pub struct InputMods {
     pub meta: bool,
 }
 
+impl InputMods {
+    fn cdp_modifiers(&self) -> i32 {
+        let mut m = 0;
+        if self.alt { m |= 1; }
+        if self.ctrl { m |= 2; }
+        if self.meta { m |= 4; }
+        if self.shift { m |= 8; }
+        m
+    }
+}
+
+/// One key press, resolved to text and a Windows virtual key code for CDP.
+#[derive(Debug, Clone)]
