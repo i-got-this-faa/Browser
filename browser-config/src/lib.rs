@@ -78,3 +78,12 @@ impl Default for Behavior {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Keybind {
+    pub key: String,
+    pub command: String,
+    #[serde(default)]
+    pub arg: Option<String>,
+}
+
+/// A command declared from Lua: name, description, and the Lua function.
+#[derive(Debug, Clone)]
