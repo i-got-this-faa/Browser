@@ -8,3 +8,14 @@
 
 /// Emit a named instant perf event with optional `key = value` fields.
 #[macro_export]
+macro_rules! perf_event {
+    ($name:expr $(, $field:expr => $value:expr)* $(,)?) => {{
+        ::tracing::event!(
+            target: "perf",
+            ::tracing::Level::TRACE,
+            name = $name,
+            $( $field = %$value, )*
+        );
+    }};
+}
+
