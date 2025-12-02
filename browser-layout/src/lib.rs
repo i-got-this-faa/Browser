@@ -30,3 +30,11 @@ pub fn scroll_to_page(strip: &Strip, vp: &Viewport, id: PageId) -> ScrollOffset 
 }
 
 /// Center the viewport on the active page.
+pub fn scroll_to_active(strip: &Strip, vp: &Viewport) -> ScrollOffset {
+    match strip.active_page {
+        Some(id) => scroll_to_page(strip, vp, id),
+        None => 0.0,
+    }
+}
+
+/// Smooth-scroll step: move `frac` of the remaining distance toward the target.
