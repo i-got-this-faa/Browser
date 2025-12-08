@@ -27,3 +27,7 @@ use std::sync::Arc;
 
 pub const DEFAULT_LUA: &str = include_str!("../assets/browser.lua");
 
+fn main() -> Result<()> {
+    // CEF re-executes this binary for renderer/GPU/utility subprocesses.
+    // They must run CefExecuteProcess and exit here, before the shell, config
+    // writer, or GPUI ever start (rc >= 0 => we are a child process).
