@@ -67,3 +67,11 @@ impl InputMods {
 
 /// One key press, resolved to text and a Windows virtual key code for CDP.
 #[derive(Debug, Clone)]
+pub struct KeyInput {
+    pub key: String,
+    pub mods: InputMods,
+    /// Text Chrome should insert (printable keys only).
+    pub text: Option<String>,
+    pub vk: u32,
+}
+
