@@ -87,3 +87,17 @@ pub struct Keybind {
 
 /// A command declared from Lua: name, description, and the Lua function.
 #[derive(Debug, Clone)]
+pub struct LuaCommand {
+    pub name: String,
+    pub description: String,
+    pub run: Function,
+}
+
+/// A lifecycle hook declared from Lua.
+#[derive(Debug, Clone)]
+pub struct LuaHook {
+    pub event: String,
+    pub handler: Function,
+}
+
+#[derive(Clone, Debug)]
