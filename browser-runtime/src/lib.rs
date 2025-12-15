@@ -59,3 +59,42 @@ pub enum Request {
     ExecLua(String),
 }
 
+impl Request {
+    /// The command name used by keybinds and the palette.
+    pub fn name(&self) -> &'static str {
+        match self {
+            Request::Navigate(_) => "page.navigate",
+            Request::FocusUrl => "focus.url",
+            Request::Reload => "page.reload",
+            Request::ReloadBypassCache => "page.reload_bypass_cache",
+            Request::Back => "page.back",
+            Request::Forward => "page.forward",
+            Request::PageNew => "page.new",
+            Request::PageNewBeside => "page.new_beside",
+            Request::PageClose => "page.close",
+            Request::FocusLeft => "focus.left",
+            Request::FocusRight => "focus.right",
+            Request::FocusUp => "focus.up",
+            Request::FocusDown => "focus.down",
+            Request::PageMoveLeft => "page.move_left",
+            Request::PageMoveRight => "page.move_right",
+            Request::PageNext => "page.next",
+            Request::PagePrev => "page.prev",
+            Request::WorkspaceNew => "workspace.new",
+            Request::WorkspaceNext => "workspace.next",
+            Request::WorkspacePrev => "workspace.prev",
+            Request::WorkspaceFocus(_) => "workspace.focus",
+            Request::PageToWorkspace(_) => "page.to_workspace",
+            Request::OverviewToggle => "overview.toggle",
+            Request::ScrollLeft => "layout.scroll_left",
+            Request::ScrollRight => "layout.scroll_right",
+            Request::OpenPalette => "palette.open",
+            Request::ConfigReload => "config.reload",
+            Request::Quit => "app.quit",
+            Request::PromptSubmit(_) => "prompt.submit",
+            Request::RunCommand { .. } => "command.run",
+            Request::ExecLua(_) => "lua.exec",
+        }
+    }
+
+    /// Build a request from command name + optional arg (keybind/palette path).
