@@ -1,0 +1,25 @@
+//! Scriptable control socket: one Unix socket, one JSON command per line.
+//!
+//! This is the automation boundary of the browser: scripts connect to
+//! `$XDG_RUNTIME_DIR/strip-browser.sock` (or `/tmp/strip-browser-$UID.sock`)
+//! and drive it exactly like a user would — the same dispatch path as keys.
+//! It is also how the headless test loop verifies real behavior.
+//!
+//! Protocol: send a JSON object, read back one JSON line.
+//!   {"cmd":"state"}                                -> full browser state
+//!   {"cmd":"exec","arg":"page.new_beside"}         -> run any command
+//!   {"cmd":"prompt","arg":"example.com"}           -> open+submit the prompt
+//!   {"cmd":"key","arg":"ctrl+k"}                   -> synthesize a keystroke
+//!   {"cmd":"quit"}                                 -> close the browser
+//!
+//! Example: `echo '{"cmd":"exec","arg":"page.new"}' | nc -U /tmp/strip-browser.sock`
+
+use crate::Shell;
+use serde_json::{json, Value};
+use std::io::{BufRead, BufReader, Write};
+use std::os::unix::net::{UnixListener, UnixStream};
+use std::path::PathBuf;
+use std::sync::Arc;
+
+/// Socket path used by scripts and tests. `STRIP_BROWSER_SOCK` overrides,
+/// then `$XDG_RUNTIME_DIR/strip-browser.sock`, then `/tmp/strip-browser.sock`.
