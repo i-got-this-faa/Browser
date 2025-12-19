@@ -15,3 +15,11 @@
 
 #include "shim.h"
 
+#include <algorithm>
+#include <atomic>
+#include <cstring>
+#include <map>
+#include <mutex>
+#include <string>
+#include <vector>
+
