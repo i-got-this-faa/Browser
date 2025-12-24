@@ -75,3 +75,11 @@ pub struct KeyInput {
     pub vk: u32,
 }
 
+impl KeyInput {
+    /// Build from a GPUI-style key name.
+    pub fn new(key: &str, mods: InputMods) -> Self {
+        let (text, vk) = key_translation(key);
+        Self { key: key.to_string(), mods, text, vk }
+    }
+}
+
