@@ -21,3 +21,24 @@ Requires a Chromium-family browser on PATH (`google-chrome`, `chromium`,
 browser. Linux/Wayland first (niri-tested), X11 works via gpui's x11
 backend.
 
+## Default keys
+
+| key | action |
+|---|---|
+| `ctrl+t` / `ctrl+shift+t` | new page / new page beside |
+| `ctrl+w` | close page |
+| `ctrl+h` / `ctrl+l` | focus left / right |
+| `ctrl+shift+h` / `ctrl+shift+l` | move page left / right |
+| `ctrl+n` / `ctrl+shift+n` | next / previous page |
+| `alt+left` / `alt+right` | back / forward |
+| `ctrl+r` / `ctrl+shift+r` | reload / reload bypassing cache |
+| `ctrl+k` | prompt: URL, search, or `:command` |
+| `ctrl+p` | command palette |
+| `ctrl+1..4` | focus workspace |
+| `ctrl+shift+1..2` | send page to workspace |
+| `ctrl+o` | overview |
+| `ctrl+shift+e` | reload browser.lua |
+| `ctrl+q` | quit |
+
+All redefinable in `browser.lua` (`keys = {}` disables every default).
+
