@@ -54,3 +54,40 @@ pub struct Strip {
 pub const DEFAULT_PAGE_FRACTION: f32 = 0.78;
 pub const DEFAULT_GAP: f32 = 12.0;
 
+impl Strip {
+    pub fn new(gap: f32, page_fraction: f32) -> Self {
+        Self {
+            pages: Vec::new(),
+            workspaces: vec![Workspace { id: 1, name: "main".into() }],
+            active_workspace: 1,
+            active_page: None,
+            next_id: 1,
+            gap,
+            page_fraction,
+        }
+    }
+
+    pub fn page(&self, id: PageId) -> Option<&Page> {
+        self.pages.iter().find(|p| p.id == id)
+    }
+
+    pub fn page_mut(&mut self, id: PageId) -> Option<&mut Page> {
+        self.pages.iter_mut().find(|p| p.id == id)
+    }
+
+    pub fn active(&self) -> Option<&Page> {
+        self.active_page.and_then(|id| self.page(id))
+    }
+
+    /// Pages in the active workspace, left to right.
+    pub fn visible(&self) -> Vec<&Page> {
+        let mut pages: Vec<&Page> = self
+            .pages
+            .iter()
+            .filter(|p| p.workspace == self.active_workspace)
+            .collect();
+        pages.sort_by(|a, b| a.x.partial_cmp(&b.x).unwrap_or(std::cmp::Ordering::Equal));
+        pages
+    }
+
+    /// Rightmost edge across all pages in the active workspace.
