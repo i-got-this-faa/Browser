@@ -101,3 +101,12 @@ pub struct LuaHook {
 }
 
 #[derive(Clone, Debug)]
+pub struct Config {
+    pub theme: Theme,
+    pub behavior: Behavior,
+    pub keys: Vec<Keybind>,
+    pub commands: Vec<LuaCommand>,
+    pub hooks: Vec<LuaHook>,
+    pub source_path: PathBuf,
+}
+
