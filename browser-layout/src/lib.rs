@@ -38,3 +38,14 @@ pub fn scroll_to_active(strip: &Strip, vp: &Viewport) -> ScrollOffset {
 }
 
 /// Smooth-scroll step: move `frac` of the remaining distance toward the target.
+pub fn scroll_step(current: ScrollOffset, target: ScrollOffset, frac: f32) -> ScrollOffset {
+    let delta = target - current;
+    if delta.abs() < 0.5 {
+        target
+    } else {
+        current + delta * frac.clamp(0.05, 1.0)
+    }
+}
+
+/// Geometry of one page for a frame: on-screen rect plus edge distance.
+#[derive(Debug, Clone, Copy)]
