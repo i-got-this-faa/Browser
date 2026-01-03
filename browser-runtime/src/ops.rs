@@ -35,3 +35,11 @@ pub struct Effects {
     pub scroll_recenter: bool,
 }
 
+impl From<()> for Effects {
+    fn from(_: ()) -> Self {
+        Self::default()
+    }
+}
+
+/// Apply a request. `submit_search` hands a non-URL prompt text back to the
+/// UI, which owns the search-engine config.
