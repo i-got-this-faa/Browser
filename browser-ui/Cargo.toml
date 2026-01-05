@@ -8,3 +8,19 @@ license.workspace = true
 name = "browser"
 path = "src/main.rs"
 
+[dependencies]
+browser-core.workspace = true
+browser-layout.workspace = true
+browser-config.workspace = true
+browser-runtime.workspace = true
+webview-cdp.workspace = true
+webview-cef.workspace = true
+gpui.workspace = true
+image.workspace = true
+smallvec.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+anyhow.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+
