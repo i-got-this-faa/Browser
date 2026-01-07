@@ -35,3 +35,11 @@ fn main() -> Result<()> {
 // Overlays
 // ---------------------------------------------------------------------------
 
+enum Overlay {
+    None,
+    /// Address/search prompt with the current editable text. `fresh` marks a
+    /// just-prefilled address bar: the first edit replaces it, matching the
+    /// select-all behavior of a real one.
+    Prompt { text: String, fresh: bool },
+    /// Command palette with filter text and a highlighted row (moved by
+    /// arrows / scroll wheel).
