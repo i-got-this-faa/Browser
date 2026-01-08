@@ -23,3 +23,17 @@
 #include <string>
 #include <vector>
 
+#include "include/cef_app.h"
+#include "include/cef_browser.h"
+#include "include/cef_client.h"
+#include "include/cef_command_line.h"
+#include "include/cef_render_handler.h"
+#include "include/cef_display_handler.h"
+#include "include/cef_load_handler.h"
+#include "include/cef_life_span_handler.h"
+#include "include/cef_focus_handler.h"
+#include "include/base/cef_callback.h"
+#include "include/cef_task.h"
+#include "include/wrapper/cef_closure_task.h"
+#include "include/wrapper/cef_helpers.h"
+
