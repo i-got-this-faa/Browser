@@ -98,3 +98,38 @@ impl Request {
     }
 
     /// Build a request from command name + optional arg (keybind/palette path).
+    pub fn from_command(name: &str, arg: Option<&str>) -> Option<Request> {
+        let r = match name {
+            "focus.url" => Request::FocusUrl,
+            "page.reload" => Request::Reload,
+            "page.reload_bypass_cache" => Request::ReloadBypassCache,
+            "page.back" => Request::Back,
+            "page.forward" => Request::Forward,
+            "page.new" => Request::PageNew,
+            "page.new_beside" => Request::PageNewBeside,
+            "page.close" => Request::PageClose,
+            "focus.left" => Request::FocusLeft,
+            "focus.right" => Request::FocusRight,
+            "focus.up" => Request::FocusUp,
+            "focus.down" => Request::FocusDown,
+            "page.move_left" => Request::PageMoveLeft,
+            "page.move_right" => Request::PageMoveRight,
+            "page.next" => Request::PageNext,
+            "page.prev" => Request::PagePrev,
+            "workspace.new" => Request::WorkspaceNew,
+            "workspace.next" => Request::WorkspaceNext,
+            "workspace.prev" => Request::WorkspacePrev,
+            "workspace.focus" => Request::WorkspaceFocus(arg?.parse().ok()?),
+            "page.to_workspace" => Request::PageToWorkspace(arg?.parse().ok()?),
+            "overview.toggle" => Request::OverviewToggle,
+            "layout.scroll_left" => Request::ScrollLeft,
+            "layout.scroll_right" => Request::ScrollRight,
+            "palette.open" => Request::OpenPalette,
+            "config.reload" => Request::ConfigReload,
+            "app.quit" => Request::Quit,
+            "page.navigate" => Request::Navigate(arg?.to_string()),
+            _ => return None,
+        };
+        Some(r)
+    }
+
