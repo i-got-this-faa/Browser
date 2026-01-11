@@ -83,3 +83,29 @@ impl KeyInput {
     }
 }
 
+fn key_translation(key: &str) -> (Option<String>, u32) {
+    match key {
+        "enter" => (Some("\r".into()), 13),
+        "tab" => (Some("\t".into()), 9),
+        "backspace" => (None, 8),
+        "escape" => (None, 27),
+        "delete" => (None, 46),
+        "left" => (None, 37),
+        "up" => (None, 38),
+        "right" => (None, 39),
+        "down" => (None, 40),
+        "home" => (None, 36),
+        "end" => (None, 35),
+        "pageup" => (None, 33),
+        "pagedown" => (None, 34),
+        "space" => (Some(" ".into()), 32),
+        other if other.len() == 1 => (Some(other.to_string()), {
+            let c = other.chars().next().unwrap().to_ascii_uppercase() as u32;
+            c
+        }),
+        _ => (None, 0),
+    }
+}
+
+/// Events that flow from a web surface to the shell.
+#[derive(Debug, Clone)]
