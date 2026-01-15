@@ -110,3 +110,17 @@ pub struct Config {
     pub source_path: PathBuf,
 }
 
+impl Default for Config {
+    fn default() -> Self {
+        Self {
+            theme: Theme::default(),
+            behavior: Behavior::default(),
+            keys: default_keys(),
+            commands: Vec::new(),
+            hooks: Vec::new(),
+            source_path: PathBuf::new(),
+        }
+    }
+}
+
+/// Default bindings. Every one of them can be replaced from browser.lua.
