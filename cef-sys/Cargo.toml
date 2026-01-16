@@ -1,0 +1,10 @@
+[package]
+name = "cef-sys"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+build = "build.rs"
+links = "cef"
+
+[build-dependencies]
+cc = "1"
