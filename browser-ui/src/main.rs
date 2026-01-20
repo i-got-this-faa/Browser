@@ -43,3 +43,15 @@ enum Overlay {
     Prompt { text: String, fresh: bool },
     /// Command palette with filter text and a highlighted row (moved by
     /// arrows / scroll wheel).
+// ---------------------------------------------------------------------------
+// Shell
+// ---------------------------------------------------------------------------
+
+/// Page-bar height. The bars are *not* overlays: the layout viewport is the
+/// window minus these reservations, so web content never renders underneath.
+const PAGE_BAR_H: f32 = 28.0;
+/// Status-bar height (bottom).
+const STATUS_BAR_H: f32 = 24.0;
+/// Rows the command palette renders; selection clamps to this window.
+const PALETTE_VISIBLE: usize = 12;
+
