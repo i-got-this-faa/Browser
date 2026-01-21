@@ -37,3 +37,21 @@
 #include "include/wrapper/cef_closure_task.h"
 #include "include/wrapper/cef_helpers.h"
 
+#ifndef CEF_SUBPROCESS_PATH
+#define CEF_SUBPROCESS_PATH "cef-helper"
+#endif
+#ifndef CEF_RESOURCES_PATH
+#define CEF_RESOURCES_PATH "Resources"
+#endif
+#ifndef CEF_LOCALES_PATH
+#define CEF_LOCALES_PATH "Resources/locales"
+#endif
+#ifndef CEF_CACHE_PATH
+#define CEF_CACHE_PATH "cef-cache"
+#endif
+#ifndef CEF_UA
+#define CEF_UA "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36"
+#endif
+
+namespace {
+
