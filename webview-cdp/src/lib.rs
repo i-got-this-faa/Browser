@@ -109,3 +109,12 @@ fn key_translation(key: &str) -> (Option<String>, u32) {
 
 /// Events that flow from a web surface to the shell.
 #[derive(Debug, Clone)]
+pub enum WebViewEvent {
+    Frame { data: Vec<u8>, width: u32, height: u32 },
+    TitleChanged(String),
+    UrlChanged(String),
+    Closed,
+}
+
+/// Contract every web-content backend implements. The shell depends only on
+/// this trait, keeping it decoupled from Chromium/CDP specifics.
