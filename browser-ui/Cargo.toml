@@ -24,3 +24,9 @@ anyhow.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
 
+[[bench]]
+name = "layout_bench"
+harness = false
+
+[package.metadata.notes]
+engine = "CEF content-API backend (webview-cef) with raw BGRA frames; frozen CDP screencast harness via STRIP_ENGINE=cdp"
