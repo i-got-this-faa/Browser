@@ -52,3 +52,21 @@ fn main() {
         build.opt_level(0);
     }
 
+    // Every wrapper translation unit + the shim.
+    let mut files: Vec<PathBuf> = Vec::new();
+    collect_sources(&wrapper, &mut files);
+    files.push(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("shim/shim.cc"));
+    for f in &files {
+        build.file(f);
+    }
+    build.compile("cef_shim");
+
+    // Link the shared engine.
+    let release_dir = root.join("Release");
+    println!("cargo:rustc-link-search=native={}", release_dir.display());
+    println!("cargo:rustc-link-lib=dylib=cef");
+
+    // Runtime: resolve libcef.so relative to the binary (target/{debug,release}).
+    println!("cargo:rustc-link-arg=-Wl,-rpath,$ORIGIN/../../vendor/cef/Release");
+}
+
