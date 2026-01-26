@@ -1,0 +1,12 @@
+-- strip-browser default configuration
+-- Location: ~/.config/strip-browser/browser.lua
+-- This file defines the whole browser experience. Save to hot-reload.
+--
+-- Shapes:
+--   browser.request { "page", "new_beside" }   -- emit a request from Lua
+--   browser.request { cmd = "workspace.focus", arg = 2 }
+--   browser.tabs, browser.active_page, browser.active_workspace  -- live snapshot
+--
+-- Prompt usage: type a URL, search words, or ":command args".
+-- The palette (ctrl+p) filters every built-in and user command.
+
