@@ -91,3 +91,21 @@ impl Strip {
     }
 
     /// Rightmost edge across all pages in the active workspace.
+    pub fn strip_right(&self) -> f32 {
+        self.visible().last().map(|p| p.right()).unwrap_or(0.0)
+    }
+
+    /// Leftmost edge across all pages in the active workspace.
+    pub fn strip_left(&self) -> f32 {
+        self.visible().first().map(|p| p.x).unwrap_or(0.0)
+    }
+
+    /// Allocate a fresh page id.
+    pub fn alloc_id(&mut self) -> PageId {
+        let id = self.next_id;
+        self.next_id += 1;
+        id
+    }
+
+    /// Insert a page to the right of the active page, bumping others.
+    /// New pages never resize existing pages.
