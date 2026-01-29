@@ -133,3 +133,37 @@ impl Request {
         Some(r)
     }
 
+    /// All built-in command names, for the palette and docs.
+    pub fn all_commands() -> &'static [(&'static str, &'static str)] {
+        &[
+            ("focus.url", "Focus the address prompt"),
+            ("page.reload", "Reload the active page"),
+            ("page.reload_bypass_cache", "Reload ignoring cache"),
+            ("page.back", "Back in history"),
+            ("page.forward", "Forward in history"),
+            ("page.new", "New page"),
+            ("page.new_beside", "New page beside the active one"),
+            ("page.close", "Close the active page"),
+            ("focus.left", "Focus the page to the left"),
+            ("focus.right", "Focus the page to the right"),
+            ("focus.up", "Focus the workspace above"),
+            ("focus.down", "Focus the workspace below"),
+            ("page.move_left", "Move the page one slot left"),
+            ("page.move_right", "Move the page one slot right"),
+            ("page.next", "Focus the next page on the strip"),
+            ("page.prev", "Focus the previous page on the strip"),
+            ("workspace.new", "Create a workspace"),
+            ("workspace.next", "Focus the next workspace"),
+            ("workspace.prev", "Focus the previous workspace"),
+            ("workspace.focus", "Focus workspace n"),
+            ("page.to_workspace", "Send the page to workspace n"),
+            ("overview.toggle", "Toggle the workspace overview"),
+            ("layout.scroll_left", "Scroll the strip left"),
+            ("layout.scroll_right", "Scroll the strip right"),
+            ("palette.open", "Open the command palette"),
+            ("config.reload", "Reload browser.lua"),
+            ("app.quit", "Quit the browser"),
+        ]
+    }
+}
+
