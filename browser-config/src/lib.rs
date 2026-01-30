@@ -124,3 +124,48 @@ impl Default for Config {
 }
 
 /// Default bindings. Every one of them can be replaced from browser.lua.
+pub fn default_keys() -> Vec<Keybind> {
+    vec![
+        kb("ctrl+h", "focus.left"),
+        kb("ctrl+l", "focus.right"),
+        kb("ctrl+alt+h", "focus.left"),
+        kb("ctrl+alt+l", "focus.right"),
+        kb("ctrl+shift+h", "page.move_left"),
+        kb("ctrl+shift+l", "page.move_right"),
+        kb("ctrl+t", "page.new"),
+        kb("ctrl+shift+t", "page.new_beside"),
+        kb("ctrl+w", "page.close"),
+        kb("ctrl+r", "page.reload"),
+        kb("ctrl+i", "focus.url"),
+        kb("ctrl+shift+r", "page.reload_bypass_cache"),
+        kb("alt+left", "page.back"),
+        kb("alt+right", "page.forward"),
+        kb("ctrl+pagedown", "page.next"),
+        kb("ctrl+pageup", "page.prev"),
+        kb_arg("ctrl+1", "workspace.focus", "1"),
+        kb_arg("ctrl+2", "workspace.focus", "2"),
+        kb_arg("ctrl+3", "workspace.focus", "3"),
+        kb_arg("ctrl+4", "workspace.focus", "4"),
+        kb_arg("ctrl+shift+1", "page.to_workspace", "1"),
+        kb_arg("ctrl+shift+2", "page.to_workspace", "2"),
+        kb_arg("ctrl+shift+3", "page.to_workspace", "3"),
+        kb_arg("ctrl+shift+4", "page.to_workspace", "4"),
+        kb("ctrl+n", "workspace.new"),
+        kb("ctrl+shift+n", "workspace.next"),
+        kb("ctrl+o", "overview.toggle"),
+        kb("ctrl+shift+o", "overview.toggle"),
+        kb("ctrl+shift+p", "palette.open"),
+        kb("ctrl+p", "palette.open"),
+        kb("ctrl+shift+e", "config.reload"),
+        kb("ctrl+q", "app.quit"),
+    ]
+}
+
+fn kb(key: &str, command: &str) -> Keybind {
+    Keybind { key: key.into(), command: command.into(), arg: None }
+}
+
+fn kb_arg(key: &str, command: &str, arg: &str) -> Keybind {
+    Keybind { key: key.into(), command: command.into(), arg: Some(arg.into()) }
+}
+
