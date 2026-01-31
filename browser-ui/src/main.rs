@@ -55,3 +55,31 @@ const STATUS_BAR_H: f32 = 24.0;
 /// Rows the command palette renders; selection clamps to this window.
 const PALETTE_VISIBLE: usize = 12;
 
+struct Shell {
+    engine: EngineController,
+    state: BrowserState,
+    config: Config,
+    lua: Option<LuaHost>,
+    lua_source: Arc<String>,
+    overlay: Overlay,
+    viewport: Viewport,
+    focus: FocusHandle,
+    reload_rx: std::sync::mpsc::Receiver<()>,
+    /// Kept alive here: dropping the watcher unregisters the notify watch,
+    /// which silently killed config hot-reload after startup.
+    _watcher: Option<WatcherHandle>,
+    /// Pending smooth-scroll target; None means settled.
+    scroll_target: Option<f32>,
+    /// Scriptable control socket (automation + headless E2E). None if bind
+    /// failed. Arc-shared so the per-frame poll can clone the handle cheaply
+    /// (a per-frame try_clone was a dup() syscall at 60Hz — see perf audit).
+    control: Option<Arc<std::os::unix::net::UnixListener>>,
+    /// Stable render surfaces per page: one BGRA buffer + one RenderImage
+    /// each, re-uploaded only on damage or resize (no per-frame allocation).
+    surfaces: HashMap<u64, Surface>,
+    /// Last size sent to each engine view; avoids redundant resize calls.
+    view_sizes: HashMap<u64, (u32, u32)>,
+    /// Last hidden state pushed per page; avoids redundant SetHidden commands.
+    focus_cache: HashMap<u64, bool>,
+}
+
