@@ -49,3 +49,15 @@ pub fn scroll_step(current: ScrollOffset, target: ScrollOffset, frac: f32) -> Sc
 
 /// Geometry of one page for a frame: on-screen rect plus edge distance.
 #[derive(Debug, Clone, Copy)]
+pub struct PageGeometry {
+    /// Left edge relative to the viewport's left edge.
+    pub rel_x: f32,
+    /// Top edge relative to the viewport's top edge.
+    pub top: f32,
+    pub width: f32,
+    pub height: f32,
+    /// Signed distance from the viewport's horizontal center to the page's
+    /// center, in viewports. 0.0 means centered.
+    pub center_dist_vp: f32,
+}
+
