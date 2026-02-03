@@ -118,3 +118,16 @@ pub enum WebViewEvent {
 
 /// Contract every web-content backend implements. The shell depends only on
 /// this trait, keeping it decoupled from Chromium/CDP specifics.
+pub trait WebView: Send {
+    fn id(&self) -> WebViewId;
+    fn send(&self, cmd: WebViewCommand) -> Result<()>;
+    fn events(&self) -> &Receiver<WebViewEvent>;
+    fn close(self: Box<Self>) -> Result<()>;
+}
+
+static NEXT_WEBVIEW_ID: AtomicU64 = AtomicU64::new(1);
+
+pub fn alloc_webview_id() -> WebViewId {
+    NEXT_WEBVIEW_ID.fetch_add(1, Ordering::SeqCst)
+}
+
