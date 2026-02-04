@@ -55,3 +55,26 @@
 
 namespace {
 
+struct Rect {
+  int32_t x = 0, y = 0, w = 0, h = 0;
+  bool empty() const { return w == 0 || h == 0; }
+  void unite(const CefRect& r) {
+    if (r.width <= 0 || r.height <= 0) return;
+    if (empty()) {
+      x = r.x; y = r.y; w = r.width; h = r.height;
+      return;
+    }
+    int32_t x2 = std::max(x + w, r.x + r.width);
+    int32_t y2 = std::max(y + h, r.y + r.height);
+    x = std::min(x, r.x);
+    y = std::min(y, r.y);
+    w = x2 - x;
+    h = y2 - y;
+  }
+  void unite(const Rect& r) {
+    unite(CefRect(r.x, r.y, r.w, r.h));
+  }
+};
+
+// Stable BGRA buffer. Reallocated ONLY when the engine changes size; damage
+// is the union of everything painted since Rust last drained.
