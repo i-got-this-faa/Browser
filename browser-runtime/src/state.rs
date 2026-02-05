@@ -22,3 +22,13 @@ pub struct PageSlot {
 
 /// Shell state: strip geometry + per-page payloads + scroll + UI flags.
 #[derive(Debug, Clone)]
+pub struct BrowserState {
+    pub strip: Strip,
+    pub slots: HashMap<PageId, PageSlot>,
+    pub scroll: ScrollOffset,
+    /// Prompt/palette overlay state lives in the UI; the shell only tracks
+    /// what affects layout or ops.
+    pub overview_open: bool,
+    pub quit_requested: bool,
+}
+
