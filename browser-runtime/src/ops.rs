@@ -43,3 +43,39 @@ impl From<()> for Effects {
 
 /// Apply a request. `submit_search` hands a non-URL prompt text back to the
 /// UI, which owns the search-engine config.
+pub fn apply(state: &mut BrowserState, vp: &Viewport, req: Request, effects: &mut Effects) {
+    match req {
+        Request::Navigate(url) => {
+            if let Some(id) = state.active_id() {
+                state.set_url(id, &url);
+                if let Some(slot) = state.slot_mut(id) {
+                    slot.loading = true;
+                }
+                effects.navigate.push((id, url));
+            } else {
+                let id = state.add_page(&url, vp);
+                effects.spawn.push((id, url));
+            }
+        }
+        // Edit-the-current-URL: prefill the prompt like a real address bar.
+        Request::FocusUrl => {
+            let url = state
+                .active_id()
+                .and_then(|id| state.strip.page(id))
+                .map(|p| p.url.clone())
+                .unwrap_or_default();
+            effects.prompt_open = Some(url);
+        }
+        Request::Reload => {
+            if let Some(id) = state.active_id() {
+                let has_url = state.strip.page(id).map(|p| !p.url.is_empty()).unwrap_or(false);
+                if has_url {
+                    effects.soft_reload.push(id);
+                }
+            }
+        }
+        // Bypass-cache reload re-navigates; the UI passes the hard flag on.
+        Request::ReloadBypassCache => {
+            if let Some(id) = state.active_id() {
+                let has_url = state.strip.page(id).map(|p| !p.url.is_empty()).unwrap_or(false);
+                if has_url {
