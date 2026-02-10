@@ -30,3 +30,9 @@ const BACKEND_NONE: u8 = 0;
 const BACKEND_CEF: u8 = 1;
 const BACKEND_CDP: u8 = 2;
 
+enum PageView {
+    Cef(Box<webview_cef::CefWebView>),
+    #[allow(dead_code)] // reachable via STRIP_ENGINE=cdp
+    Cdp(Box<dyn WebView>),
+}
+
