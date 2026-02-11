@@ -83,3 +83,7 @@ struct Shell {
     focus_cache: HashMap<u64, bool>,
 }
 
+/// One page's render surface. `bgra` is the stable CPU-side frame (CEF writes
+/// it through the shim buffer patch); `painted` is the GPUI texture derived
+/// from it. The texture is only recreated when `version` advances (damage or
+/// resize), and the atlas tile recycles via drop_image -> free_list.
