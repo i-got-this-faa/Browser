@@ -169,3 +169,7 @@ fn kb_arg(key: &str, command: &str, arg: &str) -> Keybind {
     Keybind { key: key.into(), command: command.into(), arg: Some(arg.into()) }
 }
 
+// ---------------------------------------------------------------------------
+// Lua parsing
+// ---------------------------------------------------------------------------
+
