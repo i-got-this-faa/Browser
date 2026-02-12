@@ -131,3 +131,7 @@ pub fn alloc_webview_id() -> WebViewId {
     NEXT_WEBVIEW_ID.fetch_add(1, Ordering::SeqCst)
 }
 
+// ---------------------------------------------------------------------------
+// WebSocket framing over TCP (minimal client subset for CDP)
+// ---------------------------------------------------------------------------
+
