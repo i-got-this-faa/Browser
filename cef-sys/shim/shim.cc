@@ -78,3 +78,44 @@ struct Rect {
 
 // Stable BGRA buffer. Reallocated ONLY when the engine changes size; damage
 // is the union of everything painted since Rust last drained.
+struct FrameBuffer {
+  std::vector<uint8_t> px;
+  int32_t w = 0, h = 0;
+  Rect damage;
+  std::mutex mu;
+
+  void store(const uint8_t* src, int32_t sw, int32_t sh, const Rect& dirty) {
+    std::lock_guard<std::mutex> lk(mu);
+    if (sw != w || sh != h) {
+      // Size change: reallocation (the ONLY one), then full damage.
+      w = sw; h = sh;
+      px.assign(size_t(sw) * size_t(sh) * 4, 0);
+      damage = Rect();
+      full_pending = true;
+    }
+    if (!dirty.empty()) {
+      int32_t x0 = std::max(0, dirty.x);
+      int32_t y0 = std::max(0, dirty.y);
+      int32_t x1 = std::min(w, dirty.x + dirty.w);
+      int32_t y1 = std::min(h, dirty.y + dirty.h);
+      if (x1 > x0 && y1 > y0) {
+        size_t rowbytes = size_t(x1 - x0) * 4;
+        for (int32_t row = y0; row < y1; ++row) {
+          const uint8_t* s = src + (size_t(row) * sw + x0) * 4;
+          uint8_t* d = px.data() + (size_t(row) * w + x0) * 4;
+          memcpy(d, s, rowbytes);
+        }
+      }
+      // Union must reflect this frame's damage even across drains: keep
+      // growing until Rust takes it (under the same lock, so no race).
+      damage.unite(dirty);
+    } else {
+      memcpy(px.data(), src, px.size());
+      damage = Rect();
+      full_pending = true;
+    }
+  }
+
+  bool full_pending = false;
+};
+
