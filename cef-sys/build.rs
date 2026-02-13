@@ -70,3 +70,17 @@ fn main() {
     println!("cargo:rustc-link-arg=-Wl,-rpath,$ORIGIN/../../vendor/cef/Release");
 }
 
+fn collect_sources(dir: &PathBuf, out: &mut Vec<PathBuf>) {
+    let entries = match std::fs::read_dir(dir) {
+        Ok(e) => e,
+        Err(_) => return,
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            collect_sources(&path, out);
+        } else if path.extension().and_then(|e| e.to_str()) == Some("cc") {
+            out.push(path);
+        }
+    }
+}
