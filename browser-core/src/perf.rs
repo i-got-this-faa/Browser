@@ -19,3 +19,7 @@ macro_rules! perf_event {
     }};
 }
 
+/// Span held for a scope: `let _s = perf_span!("frame");` (closes on drop),
+/// or wrap a block: `perf_span!("frame", { ... })` which returns the block's
+/// value.
+#[macro_export]
