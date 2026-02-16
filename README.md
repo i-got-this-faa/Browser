@@ -42,3 +42,10 @@ backend.
 
 All redefinable in `browser.lua` (`keys = {}` disables every default).
 
+## Documentation
+
+- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — data flow, crate map,
+  reused vs new code, frame/input paths.
+- [docs/CONFIG.md](docs/CONFIG.md) — full `browser.lua` reference.
+- `decisions.tsv` — decision log with evidence.
+
