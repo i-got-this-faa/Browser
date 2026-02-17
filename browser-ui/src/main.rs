@@ -87,3 +87,56 @@ struct Shell {
 /// it through the shim buffer patch); `painted` is the GPUI texture derived
 /// from it. The texture is only recreated when `version` advances (damage or
 /// resize), and the atlas tile recycles via drop_image -> free_list.
+impl Surface {
+    fn new() -> Self {
+        Self {
+            bgra: Vec::new(),
+            width: 0,
+            height: 0,
+            version: 0,
+            painted: None,
+            painted_version: 0,
+        }
+    }
+
+    /// CEF raw-frame path: patch damage rows from the shim buffer (BGRA,
+    /// zero per-pixel work). Empty rects == full frame. Size change is the
+    /// only reallocation.
+    fn patch_raw(&mut self, px: &[u8], w: i32, h: i32, rects: &[[i32; 4]]) {
+        let (w, h) = (w as usize, h as usize);
+        if w == 0 || h == 0 {
+            return;
+        }
+        if self.width as usize != w || self.height as usize != h {
+            self.width = w as u32;
+            self.height = h as u32;
+            self.bgra = vec![0u8; w * h * 4];
+            self.version += 1;
+        }
+        let src_stride = w * 4;
+        let full = rects.is_empty();
+        let rects: &[[i32; 4]] = if full {
+            &[[0, 0, w as i32, h as i32]]
+        } else {
+            rects
+        };
+        for r in rects {
+            let x0 = r[0].clamp(0, w as i32) as usize;
+            let y0 = r[1].clamp(0, h as i32) as usize;
+            let x1 = (r[0] + r[2]).clamp(0, w as i32) as usize;
+            let y1 = (r[1] + r[3]).clamp(0, h as i32) as usize;
+            if x1 <= x0 || y1 <= y0 {
+                continue;
+            }
+            let rowbytes = (x1 - x0) * 4;
+            for row in y0..y1 {
+                let s = &px[row * src_stride + x0 * 4..row * src_stride + x0 * 4 + rowbytes];
+                let d = &mut self.bgra[row * src_stride + x0 * 4..row * src_stride + x0 * 4 + rowbytes];
+                d.copy_from_slice(s);
+            }
+        }
+        self.version += 1;
+    }
+
+    /// Frozen CDP-harness path: decode a PNG frame into the stable buffer.
+    /// Only reachable with STRIP_ENGINE=cdp; never on the CEF frame path.
