@@ -135,3 +135,26 @@ pub fn alloc_webview_id() -> WebViewId {
 // WebSocket framing over TCP (minimal client subset for CDP)
 // ---------------------------------------------------------------------------
 
+fn write_masked_frame(stream: &mut TcpStream, payload: &[u8]) -> Result<()> {
+    let __t0 = std::time::Instant::now();
+    let mut frame = vec![0x81u8]; // FIN + text
+    let len = payload.len();
+    if len < 126 {
+        frame.push(0x80 | len as u8);
+    } else if len <= u16::MAX as usize {
+        frame.push(0x80 | 126);
+        frame.extend_from_slice(&(len as u16).to_be_bytes());
+    } else {
+        frame.push(0x80 | 127);
+        frame.extend_from_slice(&(len as u64).to_be_bytes());
+    }
+    let mask_key: [u8; 4] = rand_mask();
+    frame.extend_from_slice(&mask_key);
+    frame.extend(payload.iter().zip(mask_key.iter().cycle()).map(|(b, m)| b ^ m));
+    stream.write_all(&frame)?;
+    stream.flush()?;
+    browser_core::perf_event!("cdp.ws_write", "bytes" => frame.len(),
+        "us" => __t0.elapsed().as_micros() as u64);
+    Ok(())
+}
+
