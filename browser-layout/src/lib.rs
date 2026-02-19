@@ -61,3 +61,15 @@ pub struct PageGeometry {
     pub center_dist_vp: f32,
 }
 
+impl PageGeometry {
+    /// 1.0 when centered, falling off as the page leaves the viewport.
+    pub fn focus_factor(&self) -> f32 {
+        (-self.center_dist_vp.abs()).clamp(-2.0, 0.0).exp()
+    }
+
+    /// Visible portion of this page in the viewport.
+    pub fn visible(&self) -> bool {
+        self.rel_x + self.width > 0.0 && self.rel_x < 100000.0
+    }
+}
+
