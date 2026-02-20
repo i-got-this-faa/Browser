@@ -109,3 +109,45 @@ impl Strip {
 
     /// Insert a page to the right of the active page, bumping others.
     /// New pages never resize existing pages.
+    pub fn remove(&mut self, id: PageId) -> Option<Page> {
+        let idx = self.pages.iter().position(|p| p.id == id)?;
+        let page = self.pages.remove(idx);
+        for p in self.pages.iter_mut() {
+            if p.workspace == page.workspace && p.x > page.x {
+                p.x -= page.width + self.gap;
+            }
+        }
+        Some(page)
+    }
+
+    /// Move a page to `to_x`, shifting pages it crosses (no swap-swap bugs: shift the whole run).
+    pub fn move_page(&mut self, id: PageId, to_x: f32) {
+        let Some(page) = self.page(id) else { return };
+        let (old_x, width) = (page.x, page.width);
+        let to_x = to_x.max(0.0);
+        if (to_x - old_x).abs() < f32::EPSILON {
+            return;
+        }
+        if to_x > old_x {
+            // Pages fully to the left of the new right edge slide left by one slot.
+            let new_right = to_x + width;
+            for p in self.pages.iter_mut() {
+                if p.id != id && p.workspace == self.active_workspace && p.x > old_x && p.x + p.width <= new_right + self.gap {
+                    p.x -= width + self.gap;
+                }
+            }
+        } else {
+            // Pages fully to the right of the new left edge slide right by one slot.
+            for p in self.pages.iter_mut() {
+                if p.id != id && p.workspace == self.active_workspace && p.x + p.width < old_x && p.x >= to_x - self.gap {
+                    p.x += width + self.gap;
+                }
+            }
+        }
+        if let Some(p) = self.page_mut(id) {
+            p.x = to_x;
+        }
+    }
+
+    /// Choose the next active page after removing `removed`. Call after
+    /// `remove`: the successor has slid into the removed page's slot, so the
