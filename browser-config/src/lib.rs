@@ -173,3 +173,14 @@ fn kb_arg(key: &str, command: &str, arg: &str) -> Keybind {
 // Lua parsing
 // ---------------------------------------------------------------------------
 
+impl Config {
+    /// Parse a config file. Errors name the problem; unknown fields and
+    /// missing optional fields fall back to defaults.
+    pub fn load(path: &Path) -> Result<Self> {
+        let src = std::fs::read_to_string(path)
+            .with_context(|| format!("read {}", path.display()))?;
+        let mut cfg = Self::parse(&src).with_context(|| format!("in {}", path.display()))?;
+        cfg.source_path = path.to_path_buf();
+        Ok(cfg)
+    }
+
