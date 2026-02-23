@@ -119,3 +119,10 @@ struct FrameBuffer {
   bool full_pending = false;
 };
 
+// ---------------------------------------------------------------------------
+// Sink (C++ -> Rust)
+// ---------------------------------------------------------------------------
+
+std::atomic<cef_sink_fn> g_sink{nullptr};
+std::atomic<void*> g_sink_ud{nullptr};
+
