@@ -23,3 +23,18 @@ use std::sync::Arc;
 
 /// Socket path used by scripts and tests. `STRIP_BROWSER_SOCK` overrides,
 /// then `$XDG_RUNTIME_DIR/strip-browser.sock`, then `/tmp/strip-browser.sock`.
+pub fn socket_path() -> PathBuf {
+    if let Ok(dir) = std::env::var("STRIP_BROWSER_SOCK") {
+        return PathBuf::from(dir);
+    }
+    if let Ok(dir) = std::env::var("XDG_RUNTIME_DIR") {
+        let p = PathBuf::from(dir).join("strip-browser.sock");
+        if p.parent().map(|d| d.exists()).unwrap_or(false) {
+            return p;
+        }
+    }
+    PathBuf::from("/tmp/strip-browser.sock")
+}
+
+/// Begin listening (nonblocking). Call once at startup. The shell holds the
+/// listener in an `Arc` so the per-frame poll can share it without a dup().
