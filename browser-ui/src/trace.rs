@@ -22,3 +22,13 @@ use tracing::{Event, Id, Subscriber};
 use tracing_subscriber::layer::{Context, SubscriberExt};
 use tracing_subscriber::Layer;
 
+struct JsonlLayer {
+    file: Option<Mutex<File>>,
+    /// Span id -> (static name, creation timestamp in microseconds).
+    spans: Mutex<HashMap<u64, (&'static str, u64)>>,
+}
+
+fn thread_label() -> String {
+    std::thread::current().name().unwrap_or("unnamed").to_string()
+}
+
