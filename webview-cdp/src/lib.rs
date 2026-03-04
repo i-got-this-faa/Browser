@@ -158,3 +158,11 @@ fn write_masked_frame(stream: &mut TcpStream, payload: &[u8]) -> Result<()> {
     Ok(())
 }
 
+fn rand_mask() -> [u8; 4] {
+    let t = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .subsec_nanos();
+    [(t & 0xff) as u8, (t >> 8) as u8, (t >> 16) as u8, (t >> 24) as u8 | 0x80]
+}
+
