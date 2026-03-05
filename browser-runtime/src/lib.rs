@@ -171,3 +171,10 @@ impl Request {
 // Lua host
 // ---------------------------------------------------------------------------
 
+/// Runs browser.lua and translates table-shaped requests into [`Request`]s.
+///
+/// Scripts describe *what* they want (`{ "page", "new_beside" }` or
+/// `browser.request("page.new")`); the shell decides *how*. Before each
+/// command/hook call the UI refreshes `browser.tabs` /
+/// `browser.active_page` / `browser.active_workspace` from the snapshot, so
+/// scripts always read fresh state.
