@@ -184,3 +184,55 @@ impl Config {
         Ok(cfg)
     }
 
+    pub fn parse(src: &str) -> Result<Self> {
+        let lua = Lua::new();
+        let value: Value = lua
+            .load(src)
+            .set_name("browser.lua")
+            .eval()
+            .context("browser.lua did not run; syntax or runtime error")?;
+        let Value::Table(t) = value else {
+            return Err(anyhow!("browser.lua must return a table"));
+        };
+
+        let mut cfg = Config::default();
+        if let Some(theme) = nested_table(&t, "theme")? {
+            cfg.theme.bg = get_str_or(&theme, "bg", &cfg.theme.bg);
+            cfg.theme.bar = get_str_or(&theme, "bar", &cfg.theme.bar);
+            cfg.theme.bar_text = get_str_or(&theme, "bar_text", &cfg.theme.bar_text);
+            cfg.theme.border = get_str_or(&theme, "border", &cfg.theme.border);
+            cfg.theme.border_focus = get_str_or(&theme, "border_focus", &cfg.theme.border_focus);
+            cfg.theme.prompt_bg = get_str_or(&theme, "prompt_bg", &cfg.theme.prompt_bg);
+            cfg.theme.prompt_text = get_str_or(&theme, "prompt_text", &cfg.theme.prompt_text);
+            cfg.theme.accent = get_str_or(&theme, "accent", &cfg.theme.accent);
+        }
+        if let Some(b) = nested_table(&t, "behavior")? {
+            cfg.behavior.page_width_fraction = get_num_or(&b, "page_width_fraction", cfg.behavior.page_width_fraction)
+                .clamp(0.2, 1.0);
+            cfg.behavior.gap = get_num_or(&b, "gap", cfg.behavior.gap).max(0.0);
+            cfg.behavior.home_page = get_str_or(&b, "home_page", &cfg.behavior.home_page);
+            cfg.behavior.search_engine_url =
+                get_str_or(&b, "search_engine_url", &cfg.behavior.search_engine_url);
+            cfg.behavior.smooth_scroll = get_num_or(&b, "smooth_scroll", cfg.behavior.smooth_scroll)
+                .clamp(0.05, 1.0);
+            cfg.behavior.show_page_bar = get_bool_or(&b, "show_page_bar", cfg.behavior.show_page_bar);
+            cfg.behavior.show_status_bar = get_bool_or(&b, "show_status_bar", cfg.behavior.show_status_bar);
+        }
+        if let Some(keys) = nested_table(&t, "keys")? {
+            cfg.keys = parse_keys(&keys)?;
+        }
+        if let Some(commands) = nested_table(&t, "commands")? {
+            cfg.commands = parse_commands(&commands)?;
+        }
+        if let Some(hooks) = nested_table(&t, "events")? {
+            cfg.hooks = parse_hooks(&hooks)?;
+        }
+        Ok(cfg)
+    }
+
+    /// Look up the handler for an event, if the config declared one.
+    pub fn hook(&self, event: &str) -> Option<&Function> {
+        self.hooks.iter().find(|h| h.event == event).map(|h| &h.handler)
+    }
+}
+
