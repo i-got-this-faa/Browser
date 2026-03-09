@@ -126,3 +126,13 @@ struct FrameBuffer {
 std::atomic<cef_sink_fn> g_sink{nullptr};
 std::atomic<void*> g_sink_ud{nullptr};
 
+void emit(uint32_t kind, uint64_t view_id, const char* str) {
+  cef_sink_fn fn = g_sink.load(std::memory_order_acquire);
+  if (!fn) return;
+  cef_event_t ev{};
+  ev.kind = kind;
+  ev.view_id = view_id;
+  ev.str = str;
+  fn(&ev, g_sink_ud.load(std::memory_order_relaxed));
+}
+
