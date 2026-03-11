@@ -79,3 +79,39 @@ pub fn apply(state: &mut BrowserState, vp: &Viewport, req: Request, effects: &mu
             if let Some(id) = state.active_id() {
                 let has_url = state.strip.page(id).map(|p| !p.url.is_empty()).unwrap_or(false);
                 if has_url {
+                    effects.hard_reload.push(id);
+                }
+            }
+        }
+        Request::Back | Request::Forward => {
+            // Engine-side history: the webview applies the intent; the url
+            // event that follows updates state.
+            effects.toast = None;
+        }
+        Request::PageNew | Request::PageNewBeside => {
+            let id = state.add_page("", vp);
+            effects.spawn.push((id, String::new()));
+            effects.prompt_open = Some(String::new());
+            effects.scroll_recenter = true;
+        }
+        Request::PageClose => {
+            if let Some(id) = state.active_id() {
+                state.close_page(id, vp);
+                effects.close.push(id);
+                effects.scroll_recenter = true;
+            }
+        }
+        Request::FocusLeft | Request::PagePrev => {
+            focus_neighbor(state, vp, false);
+            effects.scroll_recenter = true;
+        }
+        Request::FocusRight | Request::PageNext => {
+            focus_neighbor(state, vp, true);
+            effects.scroll_recenter = true;
+        }
+        Request::FocusUp => {
+            if let Some(ws) = state.next_workspace(false) {
+                state.focus_workspace(ws, vp);
+                effects.scroll_recenter = true;
+            }
+        }
