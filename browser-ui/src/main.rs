@@ -141,3 +141,9 @@ impl Surface {
     /// Frozen CDP-harness path: decode a PNG frame into the stable buffer.
     /// Only reachable with STRIP_ENGINE=cdp; never on the CEF frame path.
     fn texture(&mut self, cx: &mut Context<Shell>) -> Option<Arc<RenderImage>> {
+impl Focusable for Shell {
+    fn focus_handle(&self, _: &gpui::App) -> FocusHandle {
+        self.focus.clone()
+    }
+}
+
