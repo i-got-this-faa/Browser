@@ -166,3 +166,35 @@ fn rand_mask() -> [u8; 4] {
     [(t & 0xff) as u8, (t >> 8) as u8, (t >> 16) as u8, (t >> 24) as u8 | 0x80]
 }
 
+fn read_frame(reader: &mut BufReader<TcpStream>) -> Result<Vec<u8>> {
+    let mut header = [0u8; 2];
+    reader.read_exact(&mut header)?;
+    let len = match header[1] & 0x7F {
+        126 => {
+            let mut b = [0u8; 2];
+            reader.read_exact(&mut b)?;
+            u16::from_be_bytes(b) as usize
+        }
+        127 => {
+            let mut b = [0u8; 8];
+            reader.read_exact(&mut b)?;
+            u64::from_be_bytes(b) as usize
+        }
+        n => n as usize,
+    };
+    let masked = (header[1] & 0x80) != 0;
+    let mut payload = vec![0u8; len];
+    if masked {
+        let mut mask = [0u8; 4];
+        reader.read_exact(&mut mask)?;
+        reader.read_exact(&mut payload)?;
+        for (i, b) in payload.iter_mut().enumerate() {
+            *b ^= mask[i % 4];
+        }
+    } else {
+        reader.read_exact(&mut payload)?;
+    }
+    Ok(payload)
+}
+
+/// Client frames are always masked; mask bytes follow the payload on the wire.
