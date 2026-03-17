@@ -32,3 +32,15 @@ pub struct BrowserState {
     pub quit_requested: bool,
 }
 
+impl Default for BrowserState {
+    fn default() -> Self {
+        Self {
+            strip: Strip::new(DEFAULT_GAP, DEFAULT_PAGE_FRACTION),
+            slots: HashMap::new(),
+            scroll: 0.0,
+            overview_open: false,
+            quit_requested: false,
+        }
+    }
+}
+
