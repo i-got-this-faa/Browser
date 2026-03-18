@@ -73,3 +73,7 @@ impl PageGeometry {
     }
 }
 
+/// Compute per-page geometry for a frame. Pure function of state.
+///
+/// With `overview = Some((0.0, 1.0))`-style scale factors the whole strip is
+/// zoomed out around the viewport center: niri's overview mode.
