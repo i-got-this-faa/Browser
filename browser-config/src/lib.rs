@@ -236,3 +236,27 @@ impl Config {
     }
 }
 
+fn nested_table(root: &Table, key: &str) -> Result<Option<Table>> {
+    let v: Value = root.raw_get(key)?;
+    match v {
+        Value::Table(t) => Ok(Some(t)),
+        Value::Nil => Ok(None),
+        other => Err(anyhow!("field `{key}` should be a table, got {}", other.type_name())),
+    }
+}
+
+fn get_str_or(t: &Table, key: &str, default: &str) -> String {
+    let s: Option<String> = t.raw_get(key).ok().flatten();
+    s.unwrap_or_else(|| default.to_string())
+}
+
+fn get_num_or(t: &Table, key: &str, default: f32) -> f32 {
+    let v: Option<f64> = t.raw_get(key).ok().flatten();
+    v.map(|v| v as f32).unwrap_or(default)
+}
+
+fn get_bool_or(t: &Table, key: &str, default: bool) -> bool {
+    let v: Option<bool> = t.raw_get(key).ok().flatten();
+    v.unwrap_or(default)
+}
+
