@@ -136,3 +136,18 @@ void emit(uint32_t kind, uint64_t view_id, const char* str) {
   fn(&ev, g_sink_ud.load(std::memory_order_relaxed));
 }
 
+void emit_frame(uint64_t id, bool popup, int32_t w, int32_t h,
+                const Rect& dmg) {
+  cef_sink_fn fn = g_sink.load(std::memory_order_acquire);
+  if (!fn) return;
+  cef_event_t ev{};
+  ev.kind = popup ? CEF_EV_POPUP_FRAME : CEF_EV_FRAME;
+  ev.view_id = id;
+  ev.w = w;
+  ev.h = h;
+  ev.nrects = 1;
+  ev.rects[0][0] = dmg.x; ev.rects[0][1] = dmg.y;
+  ev.rects[0][2] = dmg.w; ev.rects[0][3] = dmg.h;
+  fn(&ev, g_sink_ud.load(std::memory_order_relaxed));
+}
+
