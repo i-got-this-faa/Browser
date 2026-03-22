@@ -151,3 +151,49 @@ impl Strip {
 
     /// Choose the next active page after removing `removed`. Call after
     /// `remove`: the successor has slid into the removed page's slot, so the
+    /// right neighbor is the closest page at or right of `removed.x`.
+    pub fn pick_active_after_remove(&self, removed: &Page) -> Option<PageId> {
+        let right = self
+            .pages
+            .iter()
+            .filter(|p| p.workspace == removed.workspace && p.x >= removed.x)
+            .min_by(|a, b| a.x.partial_cmp(&b.x).unwrap_or(std::cmp::Ordering::Equal));
+        let left = self
+            .pages
+            .iter()
+            .filter(|p| p.workspace == removed.workspace && p.x < removed.x)
+            .max_by(|a, b| a.x.partial_cmp(&b.x).unwrap_or(std::cmp::Ordering::Equal));
+        right.or(left).map(|p| p.id)
+    }
+
+    pub fn create_workspace(&mut self, name: impl Into<String>) -> WorkspaceId {
+        let id = self.workspaces.iter().map(|w| w.id).max().unwrap_or(0) + 1;
+        self.workspaces.push(Workspace { id, name: name.into() });
+        id
+    }
+
+    pub fn remove_workspace(&mut self, id: WorkspaceId) -> bool {
+        if self.workspaces.len() <= 1 || !self.workspaces.iter().any(|w| w.id == id) {
+            return false;
+        }
+        self.pages.retain(|p| p.workspace != id);
+        self.workspaces.retain(|w| w.id != id);
+        if self.active_workspace == id {
+            self.active_workspace = self.workspaces[0].id;
+            self.active_page = self
+                .pages
+                .iter()
+                .find(|p| p.workspace == self.active_workspace)
+                .map(|p| p.id);
+        }
+        true
+    }
+
+    pub fn workspace_pages(&self, ws: WorkspaceId) -> Vec<&Page> {
+        let mut pages: Vec<&Page> = self.pages.iter().filter(|p| p.workspace == ws).collect();
+        pages.sort_by(|a, b| a.x.partial_cmp(&b.x).unwrap_or(std::cmp::Ordering::Equal));
+        pages
+    }
+}
+
+#[cfg(test)]
