@@ -178,3 +178,9 @@ impl Request {
 /// command/hook call the UI refreshes `browser.tabs` /
 /// `browser.active_page` / `browser.active_workspace` from the snapshot, so
 /// scripts always read fresh state.
+pub struct LuaHost {
+    lua: Lua,
+    /// Requests queued by `browser.request` during the most recent call.
+    pending: Arc<Mutex<Vec<Request>>>,
+}
+
