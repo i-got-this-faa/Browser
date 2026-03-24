@@ -147,3 +147,57 @@ impl Focusable for Shell {
     }
 }
 
+impl Shell {
+    fn new(engine: EngineController, cx: &mut Context<Self>) -> Self {
+        let (tx, reload_rx) = std::sync::mpsc::channel();
+        // Watcher must outlive this constructor or the watch is unregistered
+        // and browser.lua hot-reload dies (was a local: dropped on return).
+        let watcher = watch_config(config_path(), tx).ok();
+
+        let lua_source = std::fs::read_to_string(config_path()).unwrap_or_default();
+
+        let mut shell = Self {
+            engine,
+            state: BrowserState::default(),
+            config: Config::default(),
+            lua: None,
+            lua_source: Arc::new(lua_source),
+            overlay: Overlay::None,
+            viewport: Viewport { width: 1280.0, height: 800.0 },
+            focus: cx.focus_handle(),
+            reload_rx,
+            _watcher: watcher,
+            scroll_target: None,
+            control: control::start(),
+            surfaces: HashMap::new(),
+            view_sizes: HashMap::new(),
+            focus_cache: HashMap::new(),
+        };
+        shell.reload_lua(cx);
+        shell.ensure_first_page();
+
+        // Frame pump: a ~60Hz timer drives event draining, smooth scroll,
+        // and toast lifetime. Each tick notifies, which re-renders.
+        cx.spawn(async move |this, cx| loop {
+            cx.background_executor()
+                .timer(std::time::Duration::from_millis(16))
+                .await;
+            if this.update(cx, |this, cx| this.frame(cx)).is_err() {
+                break; // shell released: window closed
+            }
+        })
+        .detach();
+
+        shell
+    }
+
+    fn ensure_first_page(&mut self) {
+        if self.state.strip.pages.is_empty() {
+            let home = self.config.behavior.home_page.clone();
+            let id = self.state.add_page(&home, &self.viewport);
+            let mut fx = ops::Effects::default();
+            fx.spawn.push((id, home));
+            self.effects(&mut fx);
+        }
+    }
+
