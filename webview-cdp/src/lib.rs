@@ -198,3 +198,11 @@ fn read_frame(reader: &mut BufReader<TcpStream>) -> Result<Vec<u8>> {
 }
 
 /// Client frames are always masked; mask bytes follow the payload on the wire.
+// ---------------------------------------------------------------------------
+// CDP session
+// ---------------------------------------------------------------------------
+
+/// One CDP websocket session. Writes are serialized behind a mutex; responses
+/// are routed back to synchronous callers by the reader thread.
+struct CdpSession {
+    write_half: Arc<Mutex<TcpStream>>,
