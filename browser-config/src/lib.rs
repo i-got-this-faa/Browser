@@ -260,3 +260,26 @@ fn get_bool_or(t: &Table, key: &str, default: bool) -> bool {
     v.unwrap_or(default)
 }
 
+fn parse_keys(keys: &Table) -> Result<Vec<Keybind>> {
+    let mut out = Vec::new();
+    for entry in keys.sequence_values::<Value>() {
+        let Value::Table(t) = entry.context("keys entries must be tables")? else {
+            return Err(anyhow!("keys entries must be tables like {{ \"ctrl+t\", \"page.new\" }}"));
+        };
+        // Shorthand: { "ctrl+t", "page.new" } or { "ctrl+1", "workspace.focus", arg = "1" }
+        let first: Value = t.raw_get(1)?;
+        let Value::String(s) = first else {
+            return Err(anyhow!("keys entry missing key string at position 1"));
+        };
+        let key = s.to_str()?.to_string();
+        let second: Value = t.raw_get(2)?;
+        let Value::String(s) = second else {
+            return Err(anyhow!("keys entry {key} missing command string at position 2"));
+        };
+        let command = s.to_str()?.to_string();
+        let arg: Option<String> = t.raw_get("arg").ok().flatten();
+        out.push(Keybind { key, command, arg });
+    }
+    Ok(out)
+}
+
