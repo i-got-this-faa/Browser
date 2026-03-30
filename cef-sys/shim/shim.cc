@@ -151,3 +151,9 @@ void emit_frame(uint64_t id, bool popup, int32_t w, int32_t h,
   fn(&ev, g_sink_ud.load(std::memory_order_relaxed));
 }
 
+// ---------------------------------------------------------------------------
+// View. CEF-refcounted: CEF threads can outlive Rust's destroy() call by the
+// time it takes posted tasks to drain, so lifetime is owned by CefRefPtr
+// chains (global map + handlers + in-flight lambdas), never raw delete.
+// ---------------------------------------------------------------------------
+
