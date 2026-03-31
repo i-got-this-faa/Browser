@@ -36,3 +36,24 @@ enum PageView {
     Cdp(Box<dyn WebView>),
 }
 
+impl PageView {
+    fn as_webview(&self) -> &dyn WebView {
+        match self {
+            PageView::Cef(v) => v.as_ref(),
+            PageView::Cdp(v) => v.as_ref(),
+        }
+    }
+
+    /// Consume the view: `close` takes `self: Box<Self>`, so it needs the
+    /// owned box, not the reference `as_webview` hands out.
+    fn close(self) -> Result<()> {
+        match self {
+            PageView::Cef(v) => v.close(),
+            PageView::Cdp(v) => v.close(),
+        }
+    }
+}
+
+/// Cloneable handle handed to the UI. All engine access funnels through the
+/// shared state guarded by one mutex (UI-thread contention is negligible).
+#[derive(Clone)]
