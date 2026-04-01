@@ -201,3 +201,60 @@ impl Shell {
         }
     }
 
+    // -- config / lua -------------------------------------------------------
+
+    /// Re-parse Lua source, apply behavior, run load-time requests, and fire
+    /// the config_reloaded hook. On error, show it and keep the old config.
+    fn reload_lua(&mut self, cx: &mut Context<Self>) {
+        let mut host = LuaHost::new();
+        let mut load_requests = Vec::new();
+        match host.load_config(&self.lua_source, &mut load_requests) {
+            Ok(()) => {
+                self.lua = Some(host);
+                match Config::parse(&self.lua_source) {
+                    Ok(cfg) => {
+                        self.state
+                            .apply_behavior(cfg.behavior.gap, cfg.behavior.page_width_fraction);
+                        self.config = cfg;
+                    }
+                    Err(e) => self.toast(format!("config warning: {e}")),
+                }
+                for r in load_requests {
+                    self.dispatch(r, cx);
+                }
+                self.fire_hook("config_reloaded", None, cx);
+            }
+            Err(e) => self.toast(format!("browser.lua error: {e}")),
+        }
+    }
+
+    fn fire_hook(
+        &mut self,
+        event: &str,
+        payload: Option<serde_json::Value>,
+        cx: &mut Context<Self>,
+    ) {
+        if !self.lua.is_some() {
+            return;
+        }
+        let snapshot = self.snapshot();
+        let Some(host) = &mut self.lua else { return };
+        if let Err(e) = host.push_snapshot(&snapshot) {
+            eprintln!("snapshot push failed: {e}");
+            return;
+        }
+        let payload_value = match &payload {
+            Some(p) => host.json_to_lua(p),
+            None => Ok(browser_runtime::LuaValue::Nil),
+        };
+        let Ok(payload_value) = payload_value else { return };
+        match host.call_hook(event, payload_value) {
+            Ok(reqs) => {
+                for r in reqs {
+                    self.dispatch(r, cx);
+                }
+            }
+            Err(e) => self.toast(format!("{event} hook: {e}")),
+        }
+    }
+
