@@ -49,3 +49,8 @@ All redefinable in `browser.lua` (`keys = {}` disables every default).
 - [docs/CONFIG.md](docs/CONFIG.md) — full `browser.lua` reference.
 - `decisions.tsv` — decision log with evidence.
 
+## License
+
+GPL-3.0-or-later for this workspace's code. GPUI is Apache-2.0 (upstream
+notice in the crate). Chromium remains under its original licenses; no
+Chromium source is redistributed by this repository yet.
