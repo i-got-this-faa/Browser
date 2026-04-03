@@ -206,3 +206,13 @@ fn read_frame(reader: &mut BufReader<TcpStream>) -> Result<Vec<u8>> {
 /// are routed back to synchronous callers by the reader thread.
 struct CdpSession {
     write_half: Arc<Mutex<TcpStream>>,
+pub struct DevtoolsTarget {
+    #[serde(rename = "type")]
+    pub target_type: String,
+    #[serde(rename = "webSocketDebuggerUrl")]
+    pub ws_url: String,
+    #[serde(default)]
+    #[allow(dead_code)]
+    pub title: String,
+}
+
