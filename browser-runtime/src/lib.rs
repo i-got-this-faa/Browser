@@ -184,3 +184,9 @@ pub struct LuaHost {
     pending: Arc<Mutex<Vec<Request>>>,
 }
 
+impl Default for LuaHost {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
