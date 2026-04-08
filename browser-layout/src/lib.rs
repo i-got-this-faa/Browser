@@ -77,3 +77,15 @@ impl PageGeometry {
 ///
 /// With `overview = Some((0.0, 1.0))`-style scale factors the whole strip is
 /// zoomed out around the viewport center: niri's overview mode.
+pub fn frame_geometries(
+    strip: &Strip,
+    vp: &Viewport,
+    scroll: ScrollOffset,
+    _fraction: f32,
+) -> Vec<(PageId, PageGeometry)> {
+    frame_geometries_scaled(strip, vp, scroll, _fraction, 1.0)
+}
+
+/// Like [`frame_geometries`] but with an explicit zoom scale (0 < scale <= 1).
+/// Pages keep their relative strip positions; everything shrinks toward the
+/// viewport center. `scale` 1.0 is the normal mode.
