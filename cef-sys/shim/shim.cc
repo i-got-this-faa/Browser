@@ -157,3 +157,21 @@ void emit_frame(uint64_t id, bool popup, int32_t w, int32_t h,
 // chains (global map + handlers + in-flight lambdas), never raw delete.
 // ---------------------------------------------------------------------------
 
+struct View : public CefBaseRefCounted {
+  uint64_t id = 0;
+  CefRefPtr<CefBrowser> browser;  // UI thread only
+
+  FrameBuffer frame;
+  FrameBuffer popup;
+  CefRect popup_geom;             // in view coords; UI thread writes
+  std::mutex popup_geom_mu;
+
+  int32_t w = 800, h = 600;
+  float dsf = 1.0f;
+  std::mutex geom_mu;
+
+  IMPLEMENT_REFCOUNTING(View);
+};
+
+using ViewRef = CefRefPtr<View>;
+
