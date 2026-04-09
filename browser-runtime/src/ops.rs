@@ -115,3 +115,39 @@ pub fn apply(state: &mut BrowserState, vp: &Viewport, req: Request, effects: &mu
                 effects.scroll_recenter = true;
             }
         }
+        Request::FocusDown => {
+            if let Some(ws) = state.next_workspace(true) {
+                state.focus_workspace(ws, vp);
+                effects.scroll_recenter = true;
+            }
+        }
+        Request::PageMoveLeft | Request::PageMoveRight => {
+            move_active(state, vp, matches!(req, Request::PageMoveRight));
+            effects.scroll_recenter = true;
+        }
+        Request::WorkspaceNew => {
+            let n = state.strip.workspaces.len() + 1;
+            state.strip.create_workspace(format!("workspace {n}"));
+        }
+        Request::WorkspaceNext => {
+            if let Some(ws) = state.next_workspace(true) {
+                state.focus_workspace(ws, vp);
+                effects.scroll_recenter = true;
+            }
+        }
+        Request::WorkspacePrev => {
+            if let Some(ws) = state.next_workspace(false) {
+                state.focus_workspace(ws, vp);
+                effects.scroll_recenter = true;
+            }
+        }
+        Request::WorkspaceFocus(n) => {
+            state.focus_workspace(n as u64, vp);
+            effects.scroll_recenter = true;
+        }
+        Request::PageToWorkspace(n) => {
+            if let Some(id) = state.active_id() {
+                if let Some(p) = state.strip.page_mut(id) {
+                    p.workspace = n as u64;
+                }
+                let successor = state
