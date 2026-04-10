@@ -258,3 +258,50 @@ impl Shell {
         }
     }
 
+    fn run_lua_command(&mut self, name: &str, arg: Option<String>, cx: &mut Context<Self>) {
+        if !self.lua.is_some() {
+            self.toast("no config loaded");
+            return;
+        }
+        let snapshot = self.snapshot();
+        let Some(host) = &mut self.lua else {
+            self.toast("no config loaded");
+            return;
+        };
+        if let Err(e) = host.push_snapshot(&snapshot) {
+            self.toast(format!("snapshot: {e}"));
+            return;
+        }
+        match host.call_command(name, arg.clone()) {
+            Ok(reqs) => {
+                for r in reqs {
+                    self.dispatch(r, cx);
+                }
+            }
+            Err(_) => {
+                if Request::from_command(name, arg.as_deref()).is_none() {
+                    self.toast(format!("unknown command: {name}"));
+                }
+            }
+        }
+    }
+
+    fn snapshot(&self) -> browser_runtime::BrowserSnapshot {
+        browser_runtime::BrowserSnapshot {
+            tabs: self
+                .state
+                .strip
+                .visible()
+                .iter()
+                .map(|p| browser_runtime::TabInfo {
+                    id: p.id,
+                    url: p.url.clone(),
+                    title: p.title.clone(),
+                    workspace: p.workspace,
+                    active: self.state.strip.active_page == Some(p.id),
+                })
+                .collect(),
+            active_workspace: self.state.strip.active_workspace,
+        }
+    }
+
