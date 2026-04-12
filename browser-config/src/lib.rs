@@ -283,3 +283,19 @@ fn parse_keys(keys: &Table) -> Result<Vec<Keybind>> {
     Ok(out)
 }
 
+fn parse_commands(commands: &Table) -> Result<Vec<LuaCommand>> {
+    let mut out = Vec::new();
+    for pair in commands.pairs::<String, Value>() {
+        let (name, value) = pair?;
+        let Value::Table(t) = value else {
+            return Err(anyhow!("command `{name}` must be a table with desc and run fields"));
+        };
+        let description = get_str_or(&t, "desc", "");
+        let run: Function = t
+            .raw_get("run")
+            .map_err(|_| anyhow!("command `{name}` is missing its run function"))?;
+        out.push(LuaCommand { name, description, run });
+    }
+    Ok(out)
+}
+
