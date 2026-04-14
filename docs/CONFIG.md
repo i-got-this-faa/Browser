@@ -19,3 +19,8 @@ return {
 Missing keys fall back to defaults. `keys = {}` disables every default
 binding ( redefine everything or nothing).
 
+## theme
+
+`bg`, `bar`, `bar_text`, `border`, `border_focus`, `prompt_bg`,
+`prompt_text`, `accent` — `#rrggbb` strings.
+
