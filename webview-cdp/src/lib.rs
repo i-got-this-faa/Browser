@@ -216,3 +216,15 @@ pub struct DevtoolsTarget {
     pub title: String,
 }
 
+impl DevtoolsTarget {
+    /// Path part of the ws url, e.g. "/devtools/page/ABC123".
+    fn path(&self) -> String {
+        // ws://host:port/devtools/page/ID -> everything after host:port
+        let without_scheme = self.ws_url.trim_start_matches("ws://");
+        match without_scheme.find('/') {
+            Some(i) => without_scheme[i..].to_string(),
+            None => "/devtools/page".to_string(),
+        }
+    }
+}
+
