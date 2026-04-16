@@ -197,3 +197,47 @@ impl Strip {
 }
 
 #[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn strip_with(n: usize, width: f32, gap: f32) -> Strip {
+        let mut s = Strip::new(gap, DEFAULT_PAGE_FRACTION);
+        for i in 0..n {
+            let id = s.alloc_id();
+            let x = i as f32 * (width + gap);
+            s.pages.push(Page::new(id, 1, "", x, width));
+        }
+        if n > 0 {
+            s.active_page = Some(s.pages[0].id);
+        }
+        s
+    }
+
+    #[test]
+    fn insert_beside_does_not_resize_existing_pages() {
+        let mut s = strip_with(3, 100.0, 10.0);
+        let before: Vec<(u64, f32, f32)> = s.pages.iter().map(|p| (p.id, p.x, p.width)).collect();
+        let id = s.alloc_id();
+        s.insert_beside(Page::new(id, 1, "", 0.0, 100.0));
+        let insert_x = 100.0 + 10.0;
+        for (pid, x, w) in before {
+            let p = s.page(pid).unwrap();
+            assert_eq!(p.width, w, "width must never change");
+            if x < insert_x {
+                assert_eq!(p.x, x, "pages left of insert point must not move");
+            } else {
+                assert_eq!(p.x, x + 110.0, "pages at/right of insert shift by one slot");
+            }
+        }
+        assert_eq!(s.page(id).unwrap().x, insert_x);
+    }
+
+    #[test]
+    fn remove_closes_gap() {
+        let mut s = strip_with(3, 100.0, 10.0);
+        let mid = s.pages[1].id;
+        s.remove(mid);
+        assert_eq!(s.pages[1].x, 110.0);
+        assert_eq!(s.pages.len(), 2);
+    }
+
