@@ -23,3 +23,15 @@ macro_rules! perf_event {
 /// or wrap a block: `perf_span!("frame", { ... })` which returns the block's
 /// value.
 #[macro_export]
+macro_rules! perf_span {
+    ($name:expr) => {{
+        ::tracing::span!(target: "perf", ::tracing::Level::TRACE, $name)
+    }};
+    ($name:expr, $($body:tt)*) => {{
+        let __scope = ::tracing::span!(target: "perf", ::tracing::Level::TRACE, $name);
+        let __guard = __scope.enter();
+        let __out = { $($body)* };
+        drop(__guard);
+        __out
+    }};
+}
