@@ -305,3 +305,51 @@ impl Shell {
         }
     }
 
+    fn toast(&mut self, text: impl Into<String>) {
+        self.overlay = Overlay::Toast { text: text.into(), ttl_frames: 240 };
+    }
+
+    // -- dispatch -----------------------------------------------------------
+
+    /// Apply engine/UI side effects.
+    fn effects(&mut self, fx: &mut ops::Effects) {
+        for (id, url) in fx.spawn.drain(..) {
+            if url.is_empty() {
+                continue;
+            }
+            if let Err(e) = self.engine.spawn_page(id, &url) {
+                self.toast(format!("engine: {e}"));
+            }
+        }
+        for (id, url) in fx.navigate.drain(..) {
+            if url.is_empty() {
+                continue;
+            }
+            // Pages created empty have no webview yet; spawn one on demand.
+            if !self.engine.has_view(id) {
+                if let Err(e) = self.engine.spawn_page(id, &url) {
+                    self.toast(format!("engine: {e}"));
+                    continue;
+                }
+            }
+            if let Err(e) = self.engine.navigate(id, &url) {
+                self.toast(format!("engine: {e}"));
+            }
+        }
+        for id in fx.hard_reload.drain(..) {
+            let _ = self.engine.reload(id, true);
+        }
+        for id in fx.soft_reload.drain(..) {
+            let _ = self.engine.reload(id, false);
+        }
+        for id in fx.close.drain(..) {
+            self.engine.close_page(id);
+            self.view_sizes.remove(&id);
+            self.surfaces.remove(&id);
+            self.focus_cache.remove(&id);
+        }
+        if let Some(text) = fx.toast.take() {
+            self.toast(text);
+        }
+    }
+
