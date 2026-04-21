@@ -175,3 +175,8 @@ struct View : public CefBaseRefCounted {
 
 using ViewRef = CefRefPtr<View>;
 
+// ---------------------------------------------------------------------------
+// Handlers. Created per view; CEF holds refs via the client. Handlers hold
+// ViewRef so callbacks are always safe.
+// ---------------------------------------------------------------------------
+
