@@ -228,3 +228,30 @@ impl DevtoolsTarget {
     }
 }
 
+impl CdpSession {
+    fn connect(port: u16, path: &str) -> Result<(Self, Receiver<WebViewEvent>)> {
+        let stream = TcpStream::connect(("127.0.0.1", port))
+            .with_context(|| format!("connect to CDP port {port}"))?;
+        stream.set_nodelay(true).ok();
+        stream.set_read_timeout(Some(Duration::from_secs(30))).ok();
+        let mut stream = stream;
+
+        let key = "x3JJHMbDL1EzLkh9GBhXDw==";
+        let req = format!(
+            "GET {path} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: {key}\r\nSec-WebSocket-Version: 13\r\n\r\n"
+        );
+        stream.write_all(req.as_bytes())?;
+        let mut reader = BufReader::new(stream.try_clone()?);
+        let mut line = String::new();
+        loop {
+            line.clear();
+            let n = reader.read_line(&mut line)?;
+            if n == 0 {
+                return Err(anyhow!("CDP handshake failed: connection closed"));
+            }
+            if line.trim().is_empty() {
+                break;
+            }
+        }
+
+        let write_half = Arc::new(Mutex::new(stream));
