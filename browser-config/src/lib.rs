@@ -299,3 +299,12 @@ fn parse_commands(commands: &Table) -> Result<Vec<LuaCommand>> {
     Ok(out)
 }
 
+fn parse_hooks(hooks: &Table) -> Result<Vec<LuaHook>> {
+    let mut out = Vec::new();
+    for pair in hooks.pairs::<String, Function>() {
+        let (event, handler) = pair?;
+        out.push(LuaHook { event, handler });
+    }
+    Ok(out)
+}
+
