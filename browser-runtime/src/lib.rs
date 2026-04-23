@@ -190,3 +190,39 @@ impl Default for LuaHost {
     }
 }
 
+impl LuaHost {
+    pub fn new() -> Self {
+        Self { lua: Lua::new(), pending: Arc::default() }
+    }
+
+    fn bind_browser_table(&self) -> Result<()> {
+        let lua = &self.lua;
+        let pending2 = self.pending.clone();
+
+        let request = lua.create_function(move |_, req: Value| {
+            if let Some(r) = lua_value_to_request(req).ok().flatten() {
+                pending2.lock().unwrap().push(r);
+            }
+            Ok(())
+        })?;
+
+        let log = lua.create_function(|_, msg: String| {
+            eprintln!("[browser.lua] {msg}");
+            Ok(())
+        })?;
+
+        let browser = lua.create_table()?;
+        browser.set("request", request)?;
+        browser.set("log", log)?;
+        lua.globals().set("browser", browser)?;
+        Ok(())
+    }
+
+    /// Take requests queued by `browser.request` since the last drain.
+    fn drain_pending(&mut self) -> Vec<Request> {
+        self.pending.lock().unwrap().drain(..).collect()
+    }
+
+    /// Parse `browser.lua`, bind the `browser` API, and run it. The file
+    /// returns a config table (theme/behavior/keys/commands/events).
+    /// Requests emitted at load time land in `out`.
