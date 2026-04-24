@@ -44,3 +44,28 @@ impl Default for BrowserState {
     }
 }
 
+impl BrowserState {
+    pub fn new(gap: f32, fraction: f32) -> Self {
+        Self {
+            strip: Strip::new(gap, fraction),
+            ..Self::default()
+        }
+    }
+
+    /// Sync gap/fraction after a config reload, resizing page widths so the
+    /// strip reflects the new fraction without changing page count.
+    pub fn apply_behavior(&mut self, gap: f32, fraction: f32) {
+        let old_fraction = self.strip.page_fraction;
+        self.strip.gap = gap;
+        self.strip.page_fraction = fraction;
+        if (old_fraction - fraction).abs() > f32::EPSILON && fraction > 0.0 {
+            let scale = fraction / old_fraction;
+            for p in self.strip.pages.iter_mut() {
+                p.x *= scale;
+                p.width *= scale;
+            }
+        }
+    }
+
+    /// Insert a brand-new page beside the active one, with a slot, and give
+    /// it focus (niri: new windows take focus). Returns the new page id.
