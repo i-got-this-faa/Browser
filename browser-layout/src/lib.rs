@@ -89,3 +89,37 @@ pub fn frame_geometries(
 /// Like [`frame_geometries`] but with an explicit zoom scale (0 < scale <= 1).
 /// Pages keep their relative strip positions; everything shrinks toward the
 /// viewport center. `scale` 1.0 is the normal mode.
+pub fn frame_geometries_scaled(
+    strip: &Strip,
+    vp: &Viewport,
+    scroll: ScrollOffset,
+    _fraction: f32,
+    scale: f32,
+) -> Vec<(PageId, PageGeometry)> {
+    let scale = scale.clamp(0.05, 1.0);
+    let cx = vp.width / 2.0;
+    let cy = vp.height / 2.0;
+    strip
+        .visible()
+        .into_iter()
+        .map(|p: &Page| {
+            let rel_x = (p.x - scroll - cx) * scale + cx;
+            let width = p.width * scale;
+            let height = vp.height * scale;
+            let top = cy - height / 2.0;
+            let center_dist = ((p.x + p.width / 2.0) - (scroll + vp.width / 2.0)) / vp.width;
+            (
+                p.id,
+                PageGeometry {
+                    rel_x,
+                    width,
+                    height,
+                    center_dist_vp: center_dist,
+                    top,
+                },
+            )
+        })
+        .collect()
+}
+
+/// Create the first page if the strip is empty. Returns the new page.
