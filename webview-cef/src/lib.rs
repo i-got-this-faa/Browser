@@ -31,3 +31,7 @@ fn registry() -> &'static Mutex<HashMap<u64, Sink>> {
     REGISTRY.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
+/// A single web surface backed by a CEF browser (windowless). Implements the
+/// same `WebView` trait as the frozen CDP backend; frame data is exposed via
+/// [`CefWebView::with_frame`] (lock -> patch damage -> unlock: no allocation,
+/// no decode, no copy outside the lock).
