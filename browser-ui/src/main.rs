@@ -353,3 +353,31 @@ impl Shell {
         }
     }
 
+    /// Central request path: ops mutate state, effects drive the engine.
+    fn dispatch(&mut self, req: Request, cx: &mut Context<Self>) {
+        let _s = perf_span!("dispatch");
+        perf_event!("dispatch.req", "req" => req.name());
+        // History moves are engine-side; the url event updates state after.
+        if matches!(req, Request::Back | Request::Forward) {
+            if let Some(id) = self.state.active_id() {
+                let r = if req == Request::Back {
+                    self.engine.go_back(id)
+                } else {
+                    self.engine.go_forward(id)
+                };
+                if let Err(e) = r {
+                    self.toast(format!("history: {e}"));
+                }
+            }
+            cx.notify();
+            return;
+        }
+
+        let vp = self.viewport;
+        let mut fx = ops::Effects::default();
+        ops::apply(&mut self.state, &vp, req, &mut fx);
+
+        if let Some(prefill) = fx.prompt_open.take() {
+            self.overlay = Overlay::Prompt { text: prefill, fresh: true };
+        }
+        if fx.palette_open {
