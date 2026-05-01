@@ -255,3 +255,47 @@ impl CdpSession {
         }
 
         let write_half = Arc::new(Mutex::new(stream));
+
+        // Reader thread: routes responses to pending callers, events outward.
+        let event_tx = channel::<WebViewEvent>();
+        std::thread::Builder::new()
+            .name("cdp-reader".into())
+            .spawn(move || {
+                let mut reader = reader;
+                loop {
+                    match read_frame(&mut reader) {
+                        Ok(bytes) => {
+                            let v: Value = match serde_json::from_slice(&bytes) {
+                                Ok(v) => v,
+                                Err(_) => continue,
+                            };
+                            if let Some(id) = v["id"].as_i64() {
+                                if let Some(tx) = pending.lock().unwrap().remove(&id) {
+                                    let _ = tx.send(v["result"].clone());
+                                }
+                                continue;
+                            }
+                            #[cfg(feature = "debug-spawn")]
+                            if v["method"].is_string() {
+                                eprintln!("[cdp event] {}", v["method"].as_str().unwrap_or(""));
+                            }
+                            match v["method"].as_str().unwrap_or("") {
+                                "Page.screencastFrame" => {
+                                    let data = v["params"]["data"].as_str().unwrap_or("");
+                                    let width =
+                                        v["params"]["metadata"]["deviceWidth"].as_u64().unwrap_or(0) as u32;
+                                    let height =
+                                        v["params"]["metadata"]["deviceHeight"].as_u64().unwrap_or(0) as u32;
+                                    use base64::Engine as _;
+                                    if let Ok(raw) =
+                                        base64::engine::general_purpose::STANDARD.decode(data)
+                                    {
+                                        if event_tx
+                                            .0
+                                            .send(WebViewEvent::Frame { data: raw, width, height })
+                                            .is_err()
+                                        {
+                                            break;
+                                        }
+                                    }
+                                    // Ack so chrome keeps producing frames.
