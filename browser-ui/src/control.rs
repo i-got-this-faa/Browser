@@ -38,3 +38,16 @@ pub fn socket_path() -> PathBuf {
 
 /// Begin listening (nonblocking). Call once at startup. The shell holds the
 /// listener in an `Arc` so the per-frame poll can share it without a dup().
+pub fn start() -> Option<Arc<UnixListener>> {
+    let path = socket_path();
+    let _ = std::fs::remove_file(&path);
+    let listener = UnixListener::bind(&path).ok()?;
+    listener
+        .set_nonblocking(true)
+        .expect("control socket nonblocking");
+    eprintln!("control socket: {}", path.display());
+    Some(Arc::new(listener))
+}
+
+/// Poll the listener once per frame. Accepts every pending connection and
+/// answers it synchronously (clients send one request and wait for the reply).
