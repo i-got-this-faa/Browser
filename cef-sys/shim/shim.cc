@@ -180,3 +180,38 @@ using ViewRef = CefRefPtr<View>;
 // ViewRef so callbacks are always safe.
 // ---------------------------------------------------------------------------
 
+struct RenderHandler : public CefRenderHandler {
+  explicit RenderHandler(ViewRef v) : view(std::move(v)) {}
+
+  CefRefPtr<CefAccessibilityHandler> GetAccessibilityHandler() override {
+    return nullptr;
+  }
+
+  void GetViewRect(CefRefPtr<CefBrowser>, CefRect& rect) override {
+    std::lock_guard<std::mutex> lk(view->geom_mu);
+    rect = CefRect(0, 0, view->w > 0 ? view->w : 1, view->h > 0 ? view->h : 1);
+  }
+
+  bool GetScreenInfo(CefRefPtr<CefBrowser>, CefScreenInfo& info) override {
+    info.device_scale_factor = view->dsf;
+    return true;
+  }
+
+  bool GetScreenPoint(CefRefPtr<CefBrowser>, int viewX, int viewY,
+                      int& screenX, int& screenY) override {
+    screenX = viewX;
+    screenY = viewY;
+    return true;
+  }
+
+  void OnPopupShow(CefRefPtr<CefBrowser>, bool show) override {
+    if (!show) {
+      std::lock_guard<std::mutex> lk(view->popup.mu);
+      view->popup.h = 0;  // not visible; buffer contents retained
+      view->popup.damage = Rect();
+      view->popup.full_pending = false;
+      emit_frame(view->id, true, 0, 0, Rect());  // w==0 => hide popup layer
+    }
+  }
+
+  void OnPopupSize(CefRefPtr<CefBrowser>, const CefRect& rect) override {
