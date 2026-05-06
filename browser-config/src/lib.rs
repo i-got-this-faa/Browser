@@ -308,3 +308,17 @@ fn parse_hooks(hooks: &Table) -> Result<Vec<LuaHook>> {
     Ok(out)
 }
 
+// ---------------------------------------------------------------------------
+// Paths and hot reload
+// ---------------------------------------------------------------------------
+
+pub fn config_dir() -> PathBuf {
+    let home = std::env::var("HOME").unwrap_or_else(|_| ".".into());
+    PathBuf::from(home).join(DEFAULT_CONFIG_DIR)
+}
+
+pub fn config_path() -> PathBuf {
+    config_dir().join(DEFAULT_CONFIG_FILE)
+}
+
+/// Write the embedded default config to `path` if absent. Returns true when created.
