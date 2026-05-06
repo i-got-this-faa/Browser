@@ -151,3 +151,42 @@ pub fn apply(state: &mut BrowserState, vp: &Viewport, req: Request, effects: &mu
                     p.workspace = n as u64;
                 }
                 let successor = state
+                    .strip
+                    .workspace_pages(state.strip.active_workspace)
+                    .first()
+                    .map(|p| p.id);
+                state.strip.active_page = successor;
+                if let Some(s) = successor {
+                    state.scroll = browser_layout::scroll_to_page(&state.strip, vp, s);
+                }
+                effects.scroll_recenter = true;
+            }
+        }
+        Request::OverviewToggle => state.overview_open = !state.overview_open,
+        Request::ScrollLeft => {
+            let target = (state.scroll - vp.width / 2.0).max(0.0);
+            state.scroll = scroll_step(state.scroll, target, 0.35);
+        }
+        Request::ScrollRight => {
+            let target = state.scroll + vp.width / 2.0;
+            state.scroll = scroll_step(state.scroll, target, 0.35);
+        }
+        Request::OpenPalette => effects.palette_open = true,
+        Request::ConfigReload => effects.toast = Some("config reloaded".into()),
+        Request::Quit => {
+            state.quit_requested = true;
+            effects.quit = true;
+        }
+        Request::PromptSubmit(text) => handle_prompt_submit(state, vp, text, effects),
+        Request::RunCommand { name, arg } => {
+            if let Some(r) = Request::from_command(&name, arg.as_deref()) {
+                apply(state, vp, r, effects);
+            }
+        }
+        Request::ExecLua(_) => {
+            // The UI owns the LuaHost; engine-free ops cannot run chunks.
+            effects.toast = Some("lua runs only in the UI layer".into());
+        }
+    }
+}
+
