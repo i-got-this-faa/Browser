@@ -241,3 +241,47 @@ mod tests {
         assert_eq!(s.pages.len(), 2);
     }
 
+    #[test]
+    fn remove_picks_neighbor_active() {
+        let mut s = strip_with(3, 100.0, 10.0);
+        s.active_page = Some(s.pages[1].id);
+        let mid = s.pages[1].id;
+        let removed = s.remove(mid).unwrap();
+        assert_eq!(s.pick_active_after_remove(&removed), Some(s.pages[1].id));
+    }
+
+    #[test]
+    fn move_page_right_shifts_run_left() {
+        let mut s = strip_with(4, 100.0, 10.0);
+        let ids: Vec<u64> = s.pages.iter().map(|p| p.id).collect();
+        s.move_page(ids[0], 220.0); // move first to position of third
+        assert_eq!(s.page(ids[0]).unwrap().x, 220.0);
+        assert_eq!(s.page(ids[1]).unwrap().x, 0.0);
+        assert_eq!(s.page(ids[2]).unwrap().x, 110.0);
+        assert_eq!(s.page(ids[3]).unwrap().x, 330.0);
+    }
+
+    #[test]
+    fn move_page_left_shifts_run_right() {
+        let mut s = strip_with(4, 100.0, 10.0);
+        let ids: Vec<u64> = s.pages.iter().map(|p| p.id).collect();
+        s.move_page(ids[3], 110.0);
+        assert_eq!(s.page(ids[3]).unwrap().x, 110.0);
+        assert_eq!(s.page(ids[1]).unwrap().x, 220.0);
+        assert_eq!(s.page(ids[2]).unwrap().x, 330.0);
+        assert_eq!(s.page(ids[0]).unwrap().x, 0.0);
+    }
+
+    #[test]
+    fn workspaces_are_independent() {
+        let mut s = strip_with(2, 100.0, 10.0);
+        let ws = s.create_workspace("dev");
+        let page = Page::new(s.alloc_id(), ws, "", 0.0, 100.0);
+        s.pages.push(page);
+        s.active_workspace = ws;
+        assert_eq!(s.visible().len(), 1);
+        assert_eq!(s.strip_right(), 100.0);
+        assert!(s.remove_workspace(ws));
+        assert_eq!(s.pages.len(), 2);
+    }
+}
