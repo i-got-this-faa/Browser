@@ -226,3 +226,47 @@ impl LuaHost {
     /// Parse `browser.lua`, bind the `browser` API, and run it. The file
     /// returns a config table (theme/behavior/keys/commands/events).
     /// Requests emitted at load time land in `out`.
+    pub fn load_config(&mut self, src: &str, out: &mut Vec<Request>) -> Result<()> {
+        self.bind_browser_table()?;
+        let value: Value = self
+            .lua
+            .load(src)
+            .set_name("browser.lua")
+            .eval()
+            .map_err(|e| anyhow::anyhow!("browser.lua did not run: {e}"))?;
+        out.extend(self.drain_pending());
+        // Keep the returned table reachable as CONFIG so call_command and
+        // call_hook can find commands/events later.
+        if let Value::Table(t) = value {
+            self.lua.globals().set("CONFIG", t)?;
+        }
+        Ok(())
+    }
+
+    /// Read-only access for callers that need serde conversions themselves.
+    pub fn lua(&self) -> &Lua {
+        &self.lua
+    }
+
+    /// Convert a serde JSON payload into a Lua value for hook calls.
+    pub fn json_to_lua(&self, v: &serde_json::Value) -> Result<LuaValue> {
+        use mlua::LuaSerdeExt;
+        self.lua.to_value(v).map_err(|e| anyhow::anyhow!(e.to_string()))
+    }
+
+    /// Names + descriptions of user-defined commands from CONFIG.commands.
+    pub fn command_names(&self) -> Vec<(String, String)> {
+        let mut out = Vec::new();
+        let cfg: Option<Table> = self.lua.globals().get("CONFIG").ok();
+        let Some(cfg) = cfg else { return out };
+        let commands: Option<Table> = cfg.get("commands").ok();
+        let Some(commands) = commands else { return out };
+        for pair in commands.pairs::<String, Table>() {
+            if let Ok((name, entry)) = pair {
+                let desc: String = entry.get("desc").unwrap_or_default();
+                out.push((name, desc));
+            }
+        }
+        out
+    }
+
