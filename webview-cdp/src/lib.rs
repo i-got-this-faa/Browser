@@ -299,3 +299,47 @@ impl CdpSession {
                                         }
                                     }
                                     // Ack so chrome keeps producing frames.
+                                    let ack = json!({
+                                        "id": next_id.fetch_add(1, Ordering::SeqCst),
+                                        "method": "Page.screencastFrameAck",
+                                        "params": { "sessionId": v["params"]["sessionId"] }
+                                    });
+                                    if let Ok(mut w) = write_half.lock() {
+                                        let _ = write_masked_frame(&mut w, ack.to_string().as_bytes());
+                                    }
+                                }
+                                "Page.frameNavigated" => {
+                                    if let Some(u) = v["params"]["frame"]["url"].as_str() {
+                                        if !u.starts_with("about:") {
+                                            let _ = event_tx
+                                                .0
+                                                .send(WebViewEvent::UrlChanged(u.to_string()));
+                                        }
+                                    }
+                                }
+                                "Page.titleChanged" => {
+                                    if let Some(t) = v["params"]["title"].as_str() {
+                                        let _ =
+                                            event_tx.0.send(WebViewEvent::TitleChanged(t.to_string()));
+                                    }
+                                }
+                                _ => {}
+                            }
+                        }
+                        Err(e) => {
+                            // Read timeouts are normal on idle pages; only a
+                            // truly closed connection ends the reader.
+                            match e.downcast_ref::<std::io::Error>().map(|io| io.kind()) {
+                                Some(std::io::ErrorKind::WouldBlock)
+                                | Some(std::io::ErrorKind::TimedOut)
+                                | Some(std::io::ErrorKind::Interrupted) => continue,
+                                _ => {
+                                    let _ = event_tx.0.send(WebViewEvent::Closed);
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                }
+            })
+            .ok();
