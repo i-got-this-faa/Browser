@@ -381,3 +381,51 @@ impl Shell {
             self.overlay = Overlay::Prompt { text: prefill, fresh: true };
         }
         if fx.palette_open {
+    // -- prompt -------------------------------------------------------------
+
+    fn submit_prompt(&mut self, text: String, cx: &mut Context<Self>) {
+        self.overlay = Overlay::None;
+        let trimmed = text.trim().to_string();
+        if trimmed.is_empty() {
+            cx.notify();
+            return;
+        }
+        if let Some(cmd) = trimmed.strip_prefix(':') {
+            self.run_typed_command(cmd, cx);
+            cx.notify();
+            return;
+        }
+        let url = if is_url(&trimmed) {
+            if trimmed.contains("://") || trimmed.starts_with("about:") || trimmed.starts_with("data:")
+            {
+                trimmed.clone()
+            } else {
+                format!("https://{trimmed}")
+            }
+        } else {
+            self.search_url(&trimmed)
+        };
+        self.dispatch(Request::Navigate(url), cx);
+    }
+
+    fn run_typed_command(&mut self, cmd: &str, cx: &mut Context<Self>) {
+        let mut parts = cmd.splitn(2, ' ');
+        let name = parts.next().unwrap_or("");
+        let arg = parts.next().map(|s| s.to_string()).filter(|s| !s.is_empty());
+        if let Some(req) = Request::from_command(name, arg.as_deref()) {
+            self.dispatch(req, cx);
+        } else {
+            self.run_lua_command(name, arg, cx);
+        }
+    }
+
+    fn search_url(&self, query: &str) -> String {
+        self.config.behavior.search_engine_url.replacen("{}", query, 1)
+    }
+
+    // -- per-frame pump -----------------------------------------------------
+
+    /// One frame: drain engine events, poll config watcher, smooth-scroll,
+    /// then schedule the next frame. The window is only notified when
+    /// something actually changed this frame — a 60Hz unconditional notify
+    /// kept GPUI re-rendering forever (perf audit: 60 renders/s at idle).
