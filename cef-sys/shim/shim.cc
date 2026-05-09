@@ -215,3 +215,45 @@ struct RenderHandler : public CefRenderHandler {
   }
 
   void OnPopupSize(CefRefPtr<CefBrowser>, const CefRect& rect) override {
+    std::lock_guard<std::mutex> lk(view->popup_geom_mu);
+    view->popup_geom = rect;
+  }
+
+  void OnPaint(CefRefPtr<CefBrowser>, PaintElementType type,
+               const RectList& dirtyRects, const void* buffer, int width,
+               int height) override {
+    if (!buffer || width <= 0 || height <= 0) return;
+    Rect dirty;
+    for (const CefRect& r : dirtyRects) dirty.unite(r);
+
+    if (type == PET_VIEW) {
+      view->frame.store(static_cast<const uint8_t*>(buffer), width, height,
+                        dirty);
+      emit_frame(view->id, false, width, height, dirty);
+    } else {
+      int32_t px = 0, py = 0;
+      {
+        std::lock_guard<std::mutex> lk(view->popup_geom_mu);
+        px = view->popup_geom.x;
+        py = view->popup_geom.y;
+      }
+      view->popup.store(static_cast<const uint8_t*>(buffer), width, height,
+                        dirty);
+      Rect vd = dirty;
+      vd.x += px; vd.y += py;
+      emit_frame(view->id, true, width, height, vd);
+    }
+  }
+
+  void OnAcceleratedPaint(CefRefPtr<CefBrowser>, PaintElementType,
+                          const RectList&,
+                          const CefAcceleratedPaintInfo&) override {
+    // Not used: shared_texture_enabled is false. Phase 2 (dmabuf import)
+    // lands here — CEF delivers native-pixel fds on Linux.
+  }
+
+  ViewRef view;
+ private:
+  IMPLEMENT_REFCOUNTING(RenderHandler);
+};
+
