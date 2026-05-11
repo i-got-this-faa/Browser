@@ -322,3 +322,16 @@ pub fn config_path() -> PathBuf {
 }
 
 /// Write the embedded default config to `path` if absent. Returns true when created.
+pub fn ensure_default_config(path: &Path, default_src: &str) -> Result<bool> {
+    if path.exists() {
+        return Ok(false);
+    }
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    std::fs::write(path, default_src)?;
+    Ok(true)
+}
+
+/// Watch a config file and send a reload signal after changes settle.
+/// The sender receives one message per settled change.
