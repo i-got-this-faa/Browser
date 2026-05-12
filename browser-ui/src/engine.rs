@@ -57,3 +57,18 @@ impl PageView {
 /// Cloneable handle handed to the UI. All engine access funnels through the
 /// shared state guarded by one mutex (UI-thread contention is negligible).
 #[derive(Clone)]
+pub struct EngineController {
+    shared: Arc<Mutex<EngineShared>>,
+    backend: Arc<AtomicU8>,
+    dead: Arc<AtomicBool>,
+    /// CDP-only: chrome process handle for shutdown.
+    cdp_engine: Option<Arc<webview_cdp::ChromeEngine>>,
+    cdp_data_dir: Option<PathBuf>,
+}
+
+#[derive(Default)]
+struct EngineShared {
+    /// page id -> live view
+    views: HashMap<u64, PageView>,
+}
+
