@@ -123,3 +123,18 @@ pub fn frame_geometries_scaled(
 }
 
 /// Create the first page if the strip is empty. Returns the new page.
+pub fn ensure_first_page(strip: &mut Strip, vp: &Viewport) -> Page {
+    let width = vp.page_width(strip.page_fraction);
+    let id = strip.alloc_id();
+    let page = Page::new(id, strip.active_workspace, "", 0.0, width);
+    strip.pages.push(page.clone());
+    strip.active_page = Some(page.id);
+    page
+}
+
+/// Default strip, factored for reuse.
+pub fn default_strip() -> Strip {
+    Strip::new(DEFAULT_GAP, DEFAULT_PAGE_FRACTION)
+}
+
+#[cfg(test)]
