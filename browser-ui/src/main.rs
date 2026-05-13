@@ -429,3 +429,43 @@ impl Shell {
     /// then schedule the next frame. The window is only notified when
     /// something actually changed this frame — a 60Hz unconditional notify
     /// kept GPUI re-rendering forever (perf audit: 60 renders/s at idle).
+    fn frame(&mut self, cx: &mut Context<Self>) {
+        let _s = perf_span!("frame");
+        let mut dirty = false;
+
+        if self.drain_engine_events(cx) {
+            dirty = true;
+        }
+        if self.poll_config_reload(cx) {
+            dirty = true;
+        }
+        if let Some(listener) = self.control.clone() {
+            control::poll(self, &listener, cx);
+        }
+
+        if let Some(target) = self.scroll_target {
+            let next = scroll_step(self.state.scroll, target, self.config.behavior.smooth_scroll);
+            self.state.scroll = next;
+            if (next - target).abs() <= f32::EPSILON {
+                self.scroll_target = None;
+            }
+            dirty = true;
+        }
+
+        if let Overlay::Toast { ttl_frames, .. } = &mut self.overlay {
+            *ttl_frames = ttl_frames.saturating_sub(1);
+            if *ttl_frames == 0 {
+                self.overlay = Overlay::None;
+                // Only the hide needs a repaint; the countdown itself draws
+                // the identical frame 239 times otherwise.
+                dirty = true;
+            }
+        }
+
+        if dirty {
+            cx.notify();
+        }
+    }
+
+    /// Drain engine events; returns true when anything was handled so the
+    /// caller knows a repaint is needed.
