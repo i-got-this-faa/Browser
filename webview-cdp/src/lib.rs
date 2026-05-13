@@ -343,3 +343,7 @@ impl CdpSession {
                 }
             })
             .ok();
+
+        Ok((session, event_tx.1))
+    }
+
