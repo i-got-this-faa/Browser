@@ -24,3 +24,15 @@ binding ( redefine everything or nothing).
 `bg`, `bar`, `bar_text`, `border`, `border_focus`, `prompt_bg`,
 `prompt_text`, `accent` — `#rrggbb` strings.
 
+## behavior
+
+| key | default | meaning |
+|---|---|---|
+| `page_width_fraction` | 0.78 | viewport share of one page (clamped 0.2–1.0) |
+| `gap` | 12 | px between pages on the strip |
+| `home_page` | duckduckgo.com | first page / `page.new` fallback |
+| `search_engine_url` | ddg `?q={}` | `{}` replaced by the query |
+| `smooth_scroll` | 0.18 | easing fraction per frame (0.05 slow … 1 instant) |
+| `show_page_bar` | true | top chips of open pages |
+| `show_status_bar` | true | bottom workspaces + URL bar |
+
