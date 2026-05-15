@@ -35,3 +35,20 @@ fn registry() -> &'static Mutex<HashMap<u64, Sink>> {
 /// same `WebView` trait as the frozen CDP backend; frame data is exposed via
 /// [`CefWebView::with_frame`] (lock -> patch damage -> unlock: no allocation,
 /// no decode, no copy outside the lock).
+pub struct CefWebView {
+    id: WebViewId,
+    /// Shim-side view handle.
+    view: *mut c_void,
+    /// ABI-level id; also the event routing key in the sink registry.
+    abi_id: u64,
+    events: Receiver<WebViewEvent>,
+    sink_tx: Option<Sender<WebViewEvent>>,
+    damage: Arc<Mutex<Option<Vec<[i32; 4]>>>>,
+    destroyed: AtomicBool,
+}
+
+// The shim's view registry keeps the view alive (refcounted) until destroy;
+// all shim entry points are thread-safe.
+unsafe impl Send for CefWebView {}
+unsafe impl Sync for CefWebView {}
+
