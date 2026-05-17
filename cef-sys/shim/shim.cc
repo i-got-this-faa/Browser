@@ -257,3 +257,19 @@ struct RenderHandler : public CefRenderHandler {
   IMPLEMENT_REFCOUNTING(RenderHandler);
 };
 
+struct DisplayHandler : public CefDisplayHandler {
+  explicit DisplayHandler(ViewRef v) : view(std::move(v)) {}
+  void OnTitleChange(CefRefPtr<CefBrowser>, const CefString& title) override {
+    std::string t = title.ToString();
+    emit(CEF_EV_TITLE, view->id, t.c_str());
+  }
+  void OnAddressChange(CefRefPtr<CefBrowser>, CefRefPtr<CefFrame>,
+                       const CefString& url) override {
+    std::string u = url.ToString();
+    emit(CEF_EV_URL, view->id, u.c_str());
+  }
+  ViewRef view;
+ private:
+  IMPLEMENT_REFCOUNTING(DisplayHandler);
+};
+
