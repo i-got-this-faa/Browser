@@ -270,3 +270,47 @@ impl LuaHost {
         out
     }
 
+    /// Push the current snapshot so scripts can read live state.
+    pub fn push_snapshot(&self, snap: &BrowserSnapshot) -> Result<()> {
+        let __t0 = std::time::Instant::now();
+        let globals = self.lua.globals();
+        let browser: Table = globals.get("browser")?;
+        let tabs = self.lua.to_value(snap.tabs.as_slice())?;
+        browser.set("tabs", tabs)?;
+        browser.set(
+            "active_page",
+            snap.tabs.iter().find(|t| t.active).map(|t| t.id),
+        )?;
+        browser.set("active_workspace", snap.active_workspace)?;
+        browser_core::perf_event!("lua.snapshot_push",
+            "tabs" => snap.tabs.len(),
+            "us" => __t0.elapsed().as_micros() as u64);
+        Ok(())
+    }
+
+    /// Call a named config command's `run` function with an optional arg.
+    /// Returns requests the function produced.
+    pub fn call_command(&mut self, name: &str, arg: Option<String>) -> Result<Vec<Request>> {
+        let __t0 = std::time::Instant::now();
+        let globals = self.lua.globals();
+        let cfg: Option<Table> = globals.get("CONFIG").ok();
+        let Some(cfg) = cfg else {
+            anyhow::bail!("no config loaded");
+        };
+        let commands: Table = cfg.get("commands")?;
+        let entry: Option<Table> = commands.get(name).ok();
+        let Some(entry) = entry else {
+            anyhow::bail!("unknown command `{name}`");
+        };
+        let run: mlua::Function = entry.get("run")?;
+        let ret: MultiValue = match arg {
+            Some(a) => run.call((a,))?,
+            None => run.call(())?,
+        };
+        let mut reqs = self.drain_pending();
+        reqs.extend(collect_requests(ret));
+        browser_core::perf_event!("lua.command", "name" => name,
+            "us" => __t0.elapsed().as_micros() as u64);
+        Ok(reqs)
+    }
+
