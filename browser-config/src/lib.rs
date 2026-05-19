@@ -335,3 +335,22 @@ pub fn ensure_default_config(path: &Path, default_src: &str) -> Result<bool> {
 
 /// Watch a config file and send a reload signal after changes settle.
 /// The sender receives one message per settled change.
+pub fn watch_config(path: PathBuf, tx: Sender<()>) -> Result<RecommendedWatcher> {
+    let mut watcher = notify::recommended_watcher(move |res: notify::Result<notify::Event>| {
+        if let Ok(ev) = res {
+            if ev.kind.is_modify() || ev.kind.is_create() {
+                let _ = tx.send(());
+            }
+        }
+    })?;
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).ok();
+        watcher.watch(parent, notify::RecursiveMode::NonRecursive)?;
+    }
+    Ok(watcher)
+}
+
+/// How long the UI waits after a file event before reloading (editors write
+/// in bursts).
+pub const HOT_RELOAD_DEBOUNCE: Duration = Duration::from_millis(250);
+
