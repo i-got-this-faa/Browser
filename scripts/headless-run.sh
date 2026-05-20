@@ -24,3 +24,13 @@ BROWSER_BIN="$ROOT/target/debug/browser"
 SHOTS="$RUN_DIR/shots"
 mkdir -p "$SHOTS"
 
+# Minimal niri config: zero animations (deterministic shots), no gaps.
+cat > "$NIRI_CONFIG" <<'KDL'
+animations {
+    off
+}
+layout {
+    gaps 0
+}
+KDL
+
