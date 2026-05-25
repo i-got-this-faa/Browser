@@ -347,3 +347,32 @@ impl CdpSession {
         Ok((session, event_tx.1))
     }
 
+    /// Synchronous call: send, wait for the matching response.
+    fn call(&self, method: &str, params: Value) -> Result<Value> {
+        let __t0 = std::time::Instant::now();
+        let id = self.next_id.fetch_add(1, Ordering::SeqCst);
+        let (tx, rx) = channel();
+        self.pending.lock().unwrap().insert(id, tx);
+        {
+            let mut w = self.write_half.lock().map_err(|_| anyhow!("write lock poisoned"))?;
+            let msg = json!({ "id": id, "method": method, "params": params });
+            write_masked_frame(&mut w, msg.to_string().as_bytes())?;
+        }
+        let result = rx
+            .recv_timeout(Duration::from_secs(10))
+            .map_err(|_| anyhow!("CDP call {method} timed out"))?;
+        self.pending.lock().unwrap().remove(&id);
+        browser_core::perf_event!("cdp.call", "method" => method,
+            "us" => __t0.elapsed().as_micros() as u64);
+        Ok(result)
+    }
+
+    /// Fire-and-forget call for high-frequency input.
+    fn notify(&self, method: &str, params: Value) -> Result<()> {
+        let id = self.next_id.fetch_add(1, Ordering::SeqCst);
+        let mut w = self.write_half.lock().map_err(|_| anyhow!("write lock poisoned"))?;
+        let msg = json!({ "id": id, "method": method, "params": params });
+        write_masked_frame(&mut w, msg.to_string().as_bytes())
+    }
+}
+
