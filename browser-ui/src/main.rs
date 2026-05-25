@@ -469,3 +469,32 @@ impl Shell {
 
     /// Drain engine events; returns true when anything was handled so the
     /// caller knows a repaint is needed.
+    fn drain_engine_events(&mut self, cx: &mut Context<Self>) -> bool {
+        let _s = perf_span!("drain_engine_events");
+        let mut dirty = false;
+        for (page_id, ev) in self.engine.drain_events() {
+            match ev {
+                webview_cdp::WebViewEvent::Frame { data, .. } => {
+                    let __t0 = std::time::Instant::now();
+                    let surface = self.surfaces.entry(page_id).or_insert_with(Surface::new);
+                    let painted_cdp =
+                        self.engine.paint(page_id, |px, w, h, rects| {
+                            // CEF path: raw BGRA + damage. No decode, no copy
+                            // beyond damaged rows, no allocation.
+                            surface.patch_raw(px, w, h, rects);
+                        });
+                    if !painted_cdp {
+                        // Frozen CDP harness: PNG bytes -> decode. Do not
+                        // invest here; see decisions.tsv (frame/frozen).
+                        surface.patch_png(&data);
+                    }
+                    // The buffer is published to a GPUI texture in render()
+                    // (per visible page, once per rendered frame): publishing
+                    // here cloned the full 4MB buffer per damage event even
+                    // when several landed within one rendered frame.
+                    if let Some(slot) = self.state.slot_mut(page_id) {
+                        slot.loading = false;
+                    }
+                    perf_event!("frame.paint",
+                        "page" => page_id,
+                        "us" => __t0.elapsed().as_micros() as u64);
