@@ -69,3 +69,34 @@ impl BrowserState {
 
     /// Insert a brand-new page beside the active one, with a slot, and give
     /// it focus (niri: new windows take focus). Returns the new page id.
+    pub fn focus_page(&mut self, id: PageId, vp: &Viewport) {
+        if self.strip.page(id).is_some() {
+            self.strip.active_page = Some(id);
+            self.scroll = scroll_to_page(&self.strip, vp, id);
+        }
+    }
+
+    pub fn set_url(&mut self, id: PageId, url: &str) {
+        if let Some(p) = self.strip.page_mut(id) {
+            p.url = url.to_string();
+        }
+    }
+
+    pub fn set_title(&mut self, id: PageId, title: &str) {
+        if let Some(p) = self.strip.page_mut(id) {
+            p.title = title.to_string();
+        }
+    }
+
+    pub fn active_id(&self) -> Option<PageId> {
+        self.strip.active_page
+    }
+
+    pub fn slot(&self, id: PageId) -> Option<&PageSlot> {
+        self.slots.get(&id)
+    }
+
+    pub fn slot_mut(&mut self, id: PageId) -> Option<&mut PageSlot> {
+        self.slots.get_mut(&id)
+    }
+
