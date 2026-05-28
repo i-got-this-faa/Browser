@@ -273,3 +273,20 @@ struct DisplayHandler : public CefDisplayHandler {
   IMPLEMENT_REFCOUNTING(DisplayHandler);
 };
 
+struct LoadHandler : public CefLoadHandler {
+  explicit LoadHandler(ViewRef v) : view(std::move(v)) {}
+  void OnLoadingStateChange(CefRefPtr<CefBrowser>, bool isLoading, bool,
+                            bool) override {
+    cef_sink_fn fn = g_sink.load(std::memory_order_acquire);
+    if (!fn) return;
+    cef_event_t ev{};
+    ev.kind = CEF_EV_LOADING;
+    ev.view_id = view->id;
+    ev.loading = isLoading ? 1 : 0;
+    fn(&ev, g_sink_ud.load(std::memory_order_relaxed));
+  }
+  ViewRef view;
+ private:
+  IMPLEMENT_REFCOUNTING(LoadHandler);
+};
+
