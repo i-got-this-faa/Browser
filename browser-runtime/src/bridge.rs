@@ -24,3 +24,13 @@ pub struct BrowserSnapshot {
 /// Events the UI may deliver to `events.<name>` hooks.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "type", content = "args", rename_all = "snake_case")]
+pub enum HostEvent {
+    PageCreated { id: u64, url: String },
+    PageClosed { id: u64 },
+    PageFocused { id: u64 },
+    PageNavigated { id: u64, url: String },
+    PageTitleChanged { id: u64, title: String },
+    WorkspaceChanged { id: u64 },
+    ConfigReloaded,
+}
+
