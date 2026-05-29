@@ -190,3 +190,42 @@ pub fn apply(state: &mut BrowserState, vp: &Viewport, req: Request, effects: &mu
     }
 }
 
+fn handle_prompt_submit(
+    state: &mut BrowserState,
+    vp: &Viewport,
+    text: String,
+    effects: &mut Effects,
+) {
+    let text = text.trim();
+    if text.is_empty() {
+        return;
+    }
+    let looks_like_url = text.starts_with("http://")
+        || text.starts_with("https://")
+        || text.starts_with("about:")
+        || text.starts_with("file://")
+        || text.starts_with("data:")
+        || (text.contains('.') && !text.contains(' '));
+    if looks_like_url {
+        let url = if text.contains("://") || text.starts_with("data:") || text.starts_with("about:")
+        {
+            text.to_string()
+        } else {
+            format!("https://{text}")
+        };
+        if let Some(id) = state.active_id() {
+            state.set_url(id, &url);
+            if let Some(slot) = state.slot_mut(id) {
+                slot.loading = true;
+            }
+            effects.navigate.push((id, url));
+        } else {
+            let id = state.add_page(&url, vp);
+            effects.spawn.push((id, url));
+        }
+    } else {
+        // Not a URL: hand it back; the UI substitutes its search engine.
+        effects.prompt_open = Some(text.to_string());
+    }
+}
+
