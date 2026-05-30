@@ -354,3 +354,8 @@ pub fn watch_config(path: PathBuf, tx: Sender<()>) -> Result<RecommendedWatcher>
 /// in bursts).
 pub const HOT_RELOAD_DEBOUNCE: Duration = Duration::from_millis(250);
 
+// ---------------------------------------------------------------------------
+// tests
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
