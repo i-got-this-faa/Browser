@@ -498,3 +498,33 @@ impl Shell {
                     perf_event!("frame.paint",
                         "page" => page_id,
                         "us" => __t0.elapsed().as_micros() as u64);
+                    dirty = true;
+                }
+                webview_cdp::WebViewEvent::TitleChanged(title) => {
+                    perf_event!("event.title", "page" => page_id);
+                    self.state.set_title(page_id, &title);
+                    let payload = serde_json::json!({ "id": page_id, "title": title });
+                    self.fire_hook("page_title_changed", Some(payload), cx);
+                    dirty = true;
+                }
+                webview_cdp::WebViewEvent::UrlChanged(url) => {
+                    perf_event!("event.url", "page" => page_id);
+                    self.state.set_url(page_id, &url);
+                    let payload = serde_json::json!({ "id": page_id, "url": url });
+                    self.fire_hook("page_navigated", Some(payload), cx);
+                    dirty = true;
+                }
+                webview_cdp::WebViewEvent::Closed => {
+                    if self.state.close_page(page_id, &self.viewport).is_some() {
+                        self.engine.close_page(page_id);
+                    }
+                    self.surfaces.remove(&page_id);
+                    self.view_sizes.remove(&page_id);
+                    self.focus_cache.remove(&page_id);
+                    dirty = true;
+                }
+            }
+        }
+        dirty
+    }
+
