@@ -376,3 +376,9 @@ impl CdpSession {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Chrome engine
+// ---------------------------------------------------------------------------
+
+/// A spawned Chromium engine with its CDP endpoint. One engine serves many
+/// WebViews (one CDP target each), like one Helium process serves many pages.
