@@ -138,3 +138,55 @@ pub fn default_strip() -> Strip {
 }
 
 #[cfg(test)]
+mod tests {
+    use super::*;
+    use browser_core::Page;
+
+    fn strip3() -> Strip {
+        let mut s = default_strip();
+        for i in 0..3 {
+            let id = s.alloc_id();
+            s.pages.push(Page::new(id, 1, "", i as f32 * 800.0 + i as f32 * 12.0, 800.0));
+        }
+        s.active_page = Some(s.pages[1].id);
+        s
+    }
+
+    #[test]
+    fn scroll_centers_active_page() {
+        let s = strip3();
+        let vp = Viewport { width: 1000.0, height: 800.0 };
+        let scroll = scroll_to_active(&s, &vp);
+        let active = s.active().unwrap();
+        let center = active.x + active.width / 2.0;
+        assert!((scroll + vp.width / 2.0 - center).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn focus_factor_peaks_at_center() {
+        let s = strip3();
+        let vp = Viewport { width: 1000.0, height: 800.0 };
+        let scroll = scroll_to_active(&s, &vp);
+        let geos = frame_geometries(&s, &vp, scroll, s.page_fraction);
+        let active = s.active().unwrap();
+        let (_, g) = geos.iter().find(|(id, _)| *id == active.id).unwrap();
+        assert!((g.focus_factor() - 1.0).abs() < 0.01);
+        assert!((g.rel_x - (vp.width - active.width) / 2.0).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn scroll_step_converges() {
+        let mut cur = 0.0;
+        for _ in 0..100 {
+            cur = scroll_step(cur, 500.0, 0.18);
+        }
+        assert!((cur - 500.0).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn page_width_respects_fraction() {
+        let vp = Viewport { width: 1000.0, height: 800.0 };
+        assert!((vp.page_width(0.78) - 780.0).abs() < f32::EPSILON);
+        assert!(vp.page_width(0.1) >= 1.0);
+    }
+}
