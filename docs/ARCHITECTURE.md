@@ -35,3 +35,22 @@ browser.lua ──load──▶ LuaHost ──Request──▶ ops::apply ──
 | `webview-cdp` | `WebView` trait + first backend: CDP over raw TCP/websocket to a real Chromium. Screencast frames → PNG; input dispatch; navigation history. | new (backend targets Chromium/Helium) |
 | `browser-ui` | GPUI shell: strip renderer, prompt, palette, page bar, status bar, overlays, key router, engine pump. | new (UI framework is Zed's GPUI, Apache-2.0) |
 
+## Reused vs newly implemented
+
+Reused (binary-level, no source fork yet):
+- Chromium engine: Blink/V8/Skia/networking/sandbox/site isolation/media/
+  WebRTC/WebGL/WebGPU/web compatibility — via the spawned Chrome process.
+- Zed's GPUI crate (crates.io `gpui 0.2.2`, Apache-2.0) for the Rust UI:
+  windows, elements, focus, actions, text system, rendering.
+
+Newly implemented (this workspace):
+- The Niri-inspired strip/workspace model and all its math.
+- The Lua configuration/scripting system and its typed boundary.
+- The GPUI shell (no traditional browser chrome).
+- The CDP driver (websocket framing, screencast, input) in `webview-cdp`.
+
+Deferred Helium work (tracked in decisions.tsv): replacing the spawned
+Chrome binary with Helium/Chromium built from source (privacy patches,
+uBlock integration). `webview-cdp` already isolates this behind the
+`WebView` trait; the Helium backend implements the same trait.
+
