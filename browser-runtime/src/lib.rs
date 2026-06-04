@@ -314,3 +314,42 @@ impl LuaHost {
         Ok(reqs)
     }
 
+    /// Call a lifecycle hook registered under `events[event]`.
+    pub fn call_hook(&mut self, event: &str, payload: Value) -> Result<Vec<Request>> {
+        let __t0 = std::time::Instant::now();
+        let globals = self.lua.globals();
+        let cfg: Option<Table> = globals.get("CONFIG").ok();
+        let Some(cfg) = cfg else {
+            return Ok(vec![]);
+        };
+        let events: Option<Table> = cfg.get("events").ok();
+        let Some(events) = events else {
+            return Ok(vec![]);
+        };
+        let handler: Option<mlua::Function> = events.get(event).ok();
+        let Some(handler) = handler else {
+            return Ok(vec![]);
+        };
+        let ret: MultiValue = handler.call((payload,))?;
+        let mut reqs = self.drain_pending();
+        reqs.extend(collect_requests(ret));
+        browser_core::perf_event!("lua.hook", "event" => event,
+            "us" => __t0.elapsed().as_micros() as u64);
+        Ok(reqs)
+    }
+
+    /// Evaluate an arbitrary chunk and collect requests it produces.
+    pub fn exec(&mut self, chunk: &str) -> Result<Vec<Request>> {
+        let ret: MultiValue = self.lua.load(chunk).set_name("=repl").eval()?;
+        let mut reqs = self.drain_pending();
+        reqs.extend(collect_requests(ret));
+        Ok(reqs)
+    }
+}
+
+/// Convert whatever a Lua function returned into a request list. Accepts one
+/// request table, a list of them, or nil.
+fn collect_requests(ret: MultiValue) -> Vec<Request> {
+    ret.into_iter().filter_map(|v| lua_value_to_request(v).ok().flatten()).collect()
+}
+
