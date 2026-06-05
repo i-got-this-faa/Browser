@@ -52,3 +52,46 @@ pub struct CefWebView {
 unsafe impl Send for CefWebView {}
 unsafe impl Sync for CefWebView {}
 
+impl CefWebView {
+    /// Create a view; the engine must already be started.
+    pub fn create(url: &str, w: i32, h: i32) -> Result<Box<Self>> {
+        let c_url = CString::new(url)?;
+        let abi_id = next_abi_id();
+        let view = unsafe { ffi::cef_view_create(abi_id, c_url.as_ptr(), w, h) };
+        if view.is_null() {
+            return Err(anyhow!("cef_view_create failed"));
+        }
+        let (tx, rx) = channel();
+        let damage: Arc<Mutex<Option<Vec<[i32; 4]>>>> = Arc::new(Mutex::new(None));
+        registry().lock().unwrap().insert(
+            abi_id,
+            Sink { tx: Some(tx.clone()), damage: Arc::clone(&damage) },
+        );
+        Ok(Box::new(Self {
+            id: webview_cdp::alloc_webview_id(),
+            view,
+            abi_id,
+            events: rx,
+            sink_tx: Some(tx),
+            damage,
+            destroyed: AtomicBool::new(false),
+        }))
+    }
+
+    /// Event routing key (ABI id). The shell uses this to map events to pages.
+    pub fn view_key(&self) -> u64 {
+        self.abi_id
+    }
+
+    /// Run `f` with exclusive access to the stable BGRA buffer. `f` receives
+    /// (pixels, width, height, damage rects since last call; empty == full).
+    /// The only sanctioned read path — zero copy, zero allocation.
+    pub fn with_frame(&self, f: impl FnOnce(&[u8], i32, i32, &[[i32; 4]])) {
+        self.with_buffer(false, f);
+    }
+
+    /// Same as [`with_frame`] for the popup layer (select dropdowns etc.).
+    pub fn with_popup(&self, f: impl FnOnce(&[u8], i32, i32, &[[i32; 4]])) {
+        self.with_buffer(true, f);
+    }
+
