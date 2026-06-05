@@ -290,3 +290,39 @@ struct LoadHandler : public CefLoadHandler {
   IMPLEMENT_REFCOUNTING(LoadHandler);
 };
 
+struct LifeSpanHandler : public CefLifeSpanHandler {
+  explicit LifeSpanHandler(ViewRef v) : view(std::move(v)) {}
+
+  void OnAfterCreated(CefRefPtr<CefBrowser> browser) override {
+    view->browser = browser;
+  }
+
+  void OnBeforeClose(CefRefPtr<CefBrowser>) override {
+    emit(CEF_EV_CLOSED, view->id, nullptr);
+    view->browser = nullptr;
+  }
+
+  bool OnBeforePopup(CefRefPtr<CefBrowser>, CefRefPtr<CefFrame>, int,
+                     const CefString& target_url, const CefString&,
+                     WindowOpenDisposition, bool, const CefPopupFeatures&,
+                     CefWindowInfo&, CefRefPtr<CefClient>&,
+                     CefBrowserSettings&, CefRefPtr<CefDictionaryValue>&,
+                     bool*) override {
+    // No OS popups: navigate the same view instead (the strip model owns
+    // page creation). Returning true cancels popup creation.
+    CefRefPtr<CefFrame> frame = view->browser
+        ? view->browser->GetMainFrame() : nullptr;
+    if (frame) {
+      CefPostTask(TID_UI, base::BindOnce(
+          [](CefRefPtr<CefFrame> f, std::string url) {
+            f->LoadURL(url);
+          }, frame, target_url.ToString()));
+    }
+    return true;
+  }
+
+  ViewRef view;
+ private:
+  IMPLEMENT_REFCOUNTING(LifeSpanHandler);
+};
+
