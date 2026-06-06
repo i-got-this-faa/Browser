@@ -12,3 +12,18 @@ import sys
 from collections import defaultdict
 
 
+def load(path):
+    rows = []
+    with open(path) as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                rows.append(json.loads(line))
+            except json.JSONDecodeError:
+                continue
+    rows.sort(key=lambda r: r.get("t", 0))
+    return rows
+
+
