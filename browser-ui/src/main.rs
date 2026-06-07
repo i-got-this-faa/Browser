@@ -528,3 +528,28 @@ impl Shell {
         dirty
     }
 
+    fn poll_config_reload(&mut self, cx: &mut Context<Self>) -> bool {
+        let mut changed = false;
+        while self.reload_rx.try_recv().is_ok() {
+            changed = true;
+        }
+        if changed {
+            match std::fs::read_to_string(config_path()) {
+                Ok(src) => {
+                    self.lua_source = Arc::new(src);
+                    self.reload_lua(cx);
+                }
+                Err(e) => self.toast(format!("read browser.lua: {e}")),
+            }
+        }
+        changed
+    }
+
+    // -- key handling -------------------------------------------------------
+
+    fn on_key(&mut self, ev: &KeyDownEvent, _window: &mut Window, cx: &mut Context<Self>) {
+        self.route_key(&ev.keystroke, cx);
+    }
+
+    /// The single key-routing path: overlays first, then config bindings,
+    /// then the page. Used by real keys and by synthesized control-socket keys.
