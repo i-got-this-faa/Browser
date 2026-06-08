@@ -359,3 +359,39 @@ pub const HOT_RELOAD_DEBOUNCE: Duration = Duration::from_millis(250);
 // ---------------------------------------------------------------------------
 
 #[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn empty_config_yields_defaults() {
+        let cfg = Config::parse("return {}").unwrap();
+        assert_eq!(cfg.theme, Theme::default());
+        assert_eq!(cfg.behavior, Behavior::default());
+        assert_eq!(cfg.keys, default_keys(), "no keys table means default bindings");
+        assert_eq!(cfg.commands.len(), 0);
+    }
+
+    #[test]
+    fn explicit_empty_keys_means_no_bindings() {
+        let cfg = Config::parse("return { keys = {} }").unwrap();
+        assert!(cfg.keys.is_empty(), "keys = {{}} disables every default binding");
+    }
+
+    #[test]
+    fn minimal_config_overrides_subset() {
+        let src = r#"
+            return {
+                behavior = { gap = 20 },
+                keys = {
+                    { "ctrl+j", "page.new" },
+                    { "ctrl+1", "workspace.focus", arg = "1" },
+                },
+            }
+        "#;
+        let cfg = Config::parse(src).unwrap();
+        assert_eq!(cfg.behavior.gap, 20.0);
+        assert_eq!(cfg.behavior.page_width_fraction, 0.78);
+        assert_eq!(cfg.keys.len(), 2);
+        assert_eq!(cfg.keys[1].arg.as_deref(), Some("1"));
+    }
+
