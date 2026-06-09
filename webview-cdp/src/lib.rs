@@ -382,3 +382,10 @@ impl CdpSession {
 
 /// A spawned Chromium engine with its CDP endpoint. One engine serves many
 /// WebViews (one CDP target each), like one Helium process serves many pages.
+pub struct ChromeEngine {
+    pub port: u16,
+    child: Mutex<Child>,
+    #[allow(dead_code)]
+    user_data_dir: PathBuf,
+}
+
