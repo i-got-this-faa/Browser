@@ -326,3 +326,14 @@ struct LifeSpanHandler : public CefLifeSpanHandler {
   IMPLEMENT_REFCOUNTING(LifeSpanHandler);
 };
 
+struct FocusHandler : public CefFocusHandler {
+  explicit FocusHandler(ViewRef v) : view(std::move(v)) {}
+  void OnTakeFocus(CefRefPtr<CefBrowser>, bool) override {}
+  bool OnSetFocus(CefRefPtr<CefBrowser>, FocusSource) override {
+    return false;
+  }
+  ViewRef view;
+ private:
+  IMPLEMENT_REFCOUNTING(FocusHandler);
+};
+
