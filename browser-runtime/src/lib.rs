@@ -353,3 +353,8 @@ fn collect_requests(ret: MultiValue) -> Vec<Request> {
     ret.into_iter().filter_map(|v| lua_value_to_request(v).ok().flatten()).collect()
 }
 
+/// Table shapes accepted:
+///   { "page", "new_beside" }            positional
+///   { cmd = "page.new_beside" }         named
+///   { "page.navigate", "https://…" }    with string payload
+///   { cmd = "workspace.focus", arg = 2 }
