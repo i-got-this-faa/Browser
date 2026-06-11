@@ -553,3 +553,51 @@ impl Shell {
 
     /// The single key-routing path: overlays first, then config bindings,
     /// then the page. Used by real keys and by synthesized control-socket keys.
+    fn route_key(&mut self, ks: &gpui::Keystroke, cx: &mut Context<Self>) {
+        let binding = keystroke_string(ks);
+
+        // Overlay-first routing.
+        if let Overlay::Palette { text, .. } = &self.overlay {
+            let filter = text.clone();
+            self.handle_palette_key(&binding, &filter, ks, cx);
+            cx.notify();
+            return;
+        }
+        match &mut self.overlay {
+            Overlay::Prompt { text, fresh, .. } => {
+                match binding.as_str() {
+                    "escape" => self.overlay = Overlay::None,
+                    "enter" => {
+                        let t = std::mem::take(text);
+                        self.submit_prompt(t, cx);
+                    }
+                    "backspace" => {
+                        text.pop();
+                        *fresh = false;
+                    }
+                    _ => {
+                        if ks.modifiers == gpui::Modifiers::none() {
+                            if let Some(c) = &ks.key_char {
+                                // First edit on a fresh prefill replaces it
+                                // (select-all-then-type), instead of appending
+                                // after the current URL.
+                                if std::mem::take(fresh) {
+                                    text.clear();
+                                }
+                                text.push_str(c);
+                            }
+                        } else if ks.modifiers.control && ks.key == "v" {
+                            if let Some(pasted) = cx.read_from_clipboard().and_then(|i| i.text()) {
+                                if std::mem::take(fresh) {
+                                    text.clear();
+                                }
+                                text.push_str(&pasted);
+                            }
+                        }
+                    }
+                }
+                cx.notify();
+                return;
+            }
+            _ => {}
+        }
