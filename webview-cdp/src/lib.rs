@@ -389,3 +389,45 @@ pub struct ChromeEngine {
     user_data_dir: PathBuf,
 }
 
+impl ChromeEngine {
+    /// Spawn a real Chromium engine and wait for its CDP endpoint. When
+    /// Helium source is wired in, this is the function that changes.
+    pub fn spawn(chrome_path: &str, port: u16, data_dir: &PathBuf) -> Result<Self> {
+        std::fs::create_dir_all(data_dir)?;
+        let mut child = Command::new(chrome_path)
+            .arg(format!("--remote-debugging-port={port}"))
+            .arg(format!("--user-data-dir={}", data_dir.display()))
+            .arg("--headless=new")
+            .arg("--no-first-run")
+            .arg("--no-default-browser-check")
+            .arg("--disable-features=TranslateUI")
+            .arg("--hide-scrollbars")
+            .arg("--force-device-scale-factor=1")
+            .arg("--disable-gpu")
+            .arg("--window-size=1280,800")
+            .arg("--remote-allow-origins=*")
+            .arg("about:blank")
+            .stdout(Stdio::null())
+            .stderr(Stdio::piped())
+            .spawn()
+            .with_context(|| format!("spawn {chrome_path}"))?;
+
+        // Chrome announces its endpoint on stderr (also resolves port 0).
+        let stderr = child.stderr.take().context("chrome stderr unavailable")?;
+        let resolved_port = Self::wait_for_devtools_line(stderr, port)?;
+
+        let engine = Self {
+            port: resolved_port,
+            child: Mutex::new(child),
+            user_data_dir: data_dir.clone(),
+        };
+        // Endpoint responds, but give /json/list a moment to be consistent.
+        for _ in 0..50 {
+            if Self::list_targets(engine.port).is_ok() {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(100));
+        }
+        Ok(engine)
+    }
+
