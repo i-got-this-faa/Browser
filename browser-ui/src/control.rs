@@ -51,3 +51,13 @@ pub fn start() -> Option<Arc<UnixListener>> {
 
 /// Poll the listener once per frame. Accepts every pending connection and
 /// answers it synchronously (clients send one request and wait for the reply).
+pub fn poll(shell: &mut Shell, listener: &UnixListener, cx: &mut gpui::Context<Shell>) {
+    loop {
+        match listener.accept() {
+            Ok((stream, _)) => {
+                let _ = serve(stream, shell, cx);
+            }
+            Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => break,
+            Err(_) => break,
+        }
+    }
