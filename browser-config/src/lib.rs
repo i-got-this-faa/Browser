@@ -395,3 +395,26 @@ mod tests {
         assert_eq!(cfg.keys[1].arg.as_deref(), Some("1"));
     }
 
+    #[test]
+    fn theme_and_commands_and_hooks_parse() {
+        let src = r##"
+            local M = {}
+            M.theme = { bg = "#000000", accent = "#ff0000" }
+            M.commands = {
+                ["my.zoom"] = { desc = "Zoom the focused page", run = function() end },
+            }
+            M.events = {
+                page_created = function(page) end,
+            }
+            return M
+        "##;
+        let cfg = Config::parse(src).unwrap();
+        assert_eq!(cfg.theme.bg, "#000000");
+        assert_eq!(cfg.theme.bar, Theme::default().bar, "unspecified theme keys default");
+        assert_eq!(cfg.commands[0].name, "my.zoom");
+        assert_eq!(cfg.commands[0].description, "Zoom the focused page");
+        assert_eq!(cfg.hooks[0].event, "page_created");
+        assert!(cfg.hook("page_created").is_some());
+        assert!(cfg.hook("nothing").is_none());
+    }
+
