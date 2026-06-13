@@ -39,3 +39,9 @@ fn unix_us() -> u64 {
         .unwrap_or(0)
 }
 
+fn write_line(file: &Mutex<File>, line: &str) {
+    if let Ok(mut g) = file.lock() {
+        let _ = g.write_all(line.as_bytes());
+    }
+}
+
