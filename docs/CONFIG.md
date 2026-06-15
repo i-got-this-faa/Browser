@@ -36,3 +36,23 @@ binding ( redefine everything or nothing).
 | `show_page_bar` | true | top chips of open pages |
 | `show_status_bar` | true | bottom workspaces + URL bar |
 
+## keys
+
+One binding per entry: `{ "mod+key", "command" }` or
+`{ "ctrl+1", "workspace.focus", arg = "1" }`. Same keystroke syntax as
+GPUI (`ctrl+alt+shift+key`).
+
+Commands (arg where noted):
+
+```
+focus.url            focus.right         page.move_right     palette.open
+page.reload          focus.up            page.next           config.reload
+page.reload_bypass_cache  focus.down     page.prev           app.quit
+page.back            page.new            workspace.new       layout.scroll_left
+page.forward         page.new_beside     workspace.next      layout.scroll_right
+focus.left           page.close          workspace.prev (arg = n)
+                                         workspace.focus (arg = n)
+                                         page.to_workspace (arg = n)
+                                         overview.toggle
+```
+
