@@ -229,3 +229,14 @@ fn handle_prompt_submit(
     }
 }
 
+fn focus_neighbor(state: &mut BrowserState, vp: &Viewport, right: bool) {
+    let Some(active) = state.active_id() else { return };
+    let pages = state.strip.visible();
+    let Some(i) = pages.iter().position(|p| p.id == active) else { return };
+    let target = if right { i + 1 } else { i.wrapping_sub(1) };
+    if let Some(p) = pages.get(target) {
+        let id = p.id;
+        state.focus_page(id, vp);
+    }
+}
+
