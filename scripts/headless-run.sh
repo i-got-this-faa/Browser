@@ -34,3 +34,19 @@ layout {
 }
 KDL
 
+cleanup() {
+  jobs -p | xargs -r kill 2>/dev/null || true
+  pkill -f "target/debug/browser" 2>/dev/null || true
+  pkill -f "niri -c" 2>/dev/null || true
+}
+trap cleanup EXIT
+
+echo "== starting cage (headless) =="
+"$CAGE" -s "bash -c 'sleep infinity'" >/dev/null 2>&1 &
+CAGE_PID=$!
+sleep 2
+
+# Cage's wayland socket: newest socket in XDG_RUNTIME_DIR (no .lock files).
+CAGE_DISPLAY="$(find "$XDG_RUNTIME_DIR" -maxdepth 1 -name 'wayland-*' ! -name '*.lock' -printf '%f\n' | sort -V | tail -1)"
+export WAYLAND_DISPLAY="$CAGE_DISPLAY"
+echo "== cage socket: $CAGE_DISPLAY =="
