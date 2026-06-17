@@ -72,3 +72,22 @@ struct EngineShared {
     views: HashMap<u64, PageView>,
 }
 
+impl EngineController {
+    /// Spawn the engine: CEF (default) or the frozen CDP harness
+    /// (STRIP_ENGINE=cdp). Falls back to CDP when CEF cannot start.
+    pub fn spawn(max_retries: u32) -> Result<Self> {
+        if std::env::var("STRIP_ENGINE").as_deref() != Ok("cdp") {
+            match Self::spawn_cef() {
+                Ok(s) => return Ok(s),
+                Err(e) => eprintln!("cef engine unavailable ({e}); falling back to cdp harness"),
+            }
+        }
+        Self::spawn_cdp(max_retries)
+    }
+
+    fn spawn_cef() -> Result<Self> {
+        // Vendored CEF layout; STRIP_CEF_ROOT overrides for relocatable builds.
+        let root = std::env::var("STRIP_CEF_ROOT")
+            .map(PathBuf::from)
+            .unwrap_or_else(|_| PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../vendor/cef"));
+        let resources = root.join("Resources");
