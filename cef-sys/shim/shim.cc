@@ -337,3 +337,22 @@ struct FocusHandler : public CefFocusHandler {
   IMPLEMENT_REFCOUNTING(FocusHandler);
 };
 
+struct Client : public CefClient {
+  explicit Client(ViewRef v)
+      : render(new RenderHandler(v)), display(new DisplayHandler(v)),
+        load(new LoadHandler(v)), lifespan(new LifeSpanHandler(v)),
+        focus(new FocusHandler(v)) {}
+
+  CefRefPtr<CefRenderHandler> GetRenderHandler() override { return render; }
+  CefRefPtr<CefDisplayHandler> GetDisplayHandler() override { return display; }
+  CefRefPtr<CefLoadHandler> GetLoadHandler() override { return load; }
+  CefRefPtr<CefLifeSpanHandler> GetLifeSpanHandler() override { return lifespan; }
+  CefRefPtr<CefFocusHandler> GetFocusHandler() override { return focus; }
+
+  CefRefPtr<RenderHandler> render;
+  CefRefPtr<DisplayHandler> display;
+  CefRefPtr<LoadHandler> load;
+  CefRefPtr<LifeSpanHandler> lifespan;
+  CefRefPtr<FocusHandler> focus;
+ private:
+  IMPLEMENT_REFCOUNTING(Client);
