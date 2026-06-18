@@ -601,3 +601,33 @@ impl Shell {
             }
             _ => {}
         }
+
+        // Normal mode: config keybindings.
+        let hit = self.config.keys.iter().find(|k| k.key == binding).map(|k| {
+            (k.command.clone(), k.arg.clone())
+        });
+        if let Some((cmd, arg)) = hit {
+            if let Some(req) = Request::from_command(&cmd, arg.as_deref()) {
+                self.dispatch(req, cx);
+            } else {
+                self.run_lua_command(&cmd, arg, cx);
+            }
+            return;
+        }
+
+        // Unbound keys go to the page (typing in inputs etc).
+        if let Some(active) = self.state.active_id() {
+            let (text, vk) = cdp_key(ks);
+            self.engine.keys(
+                active,
+                vec![webview_cdp::KeyInput {
+                    key: ks.key.clone(),
+                    mods: cdp_mods(&ks.modifiers),
+                    text,
+                    vk,
+                }],
+            );
+        }
+        cx.notify();
+    }
+
