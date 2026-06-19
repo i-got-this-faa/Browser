@@ -100,3 +100,37 @@ impl BrowserState {
         self.slots.get_mut(&id)
     }
 
+    /// Switch workspaces, focusing the first page there if one exists.
+    pub fn focus_workspace(&mut self, ws: WorkspaceId, vp: &Viewport) {
+        if !self.strip.workspaces.iter().any(|w| w.id == ws) {
+            return;
+        }
+        self.strip.active_workspace = ws;
+        let first = self.strip.workspace_pages(ws).first().map(|p| p.id);
+        self.strip.active_page = first;
+        if let Some(f) = first {
+            self.scroll = scroll_to_page(&self.strip, vp, f);
+        } else {
+            self.scroll = scroll_to_active(&self.strip, vp);
+        }
+    }
+
+    /// Next workspace id in creation order after the active one (wraps).
+    pub fn next_workspace(&self, forward: bool) -> Option<WorkspaceId> {
+        let mut ids: Vec<WorkspaceId> = self.strip.workspaces.iter().map(|w| w.id).collect();
+        if ids.len() < 2 {
+            return None;
+        }
+        ids.sort_unstable();
+        let cur = self.strip.active_workspace;
+        let idx = ids.iter().position(|i| *i == cur)?;
+        let next = if forward {
+            (idx + 1) % ids.len()
+        } else {
+            (idx + ids.len() - 1) % ids.len()
+        };
+        ids.get(next).copied()
+    }
+}
+
+#[cfg(test)]
