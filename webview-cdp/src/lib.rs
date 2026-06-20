@@ -431,3 +431,26 @@ impl ChromeEngine {
         Ok(engine)
     }
 
+    fn wait_for_devtools_line(stderr: impl Read, requested: u16) -> Result<u16> {
+        let reader = BufReader::new(stderr);
+        for line in reader.lines() {
+            let line = line?;
+            #[cfg(feature = "debug-spawn")]
+            eprintln!("[chrome-stderr] {line}");
+            if let Some(port) = line
+                .split("DevTools listening on ws://127.0.0.1:")
+                .nth(1)
+                .and_then(|rest| rest.split('/').next())
+                .and_then(|p| p.parse().ok())
+            {
+                return Ok(port);
+            }
+        }
+        if requested != 0 {
+            // Fall back to the requested port; some builds log differently.
+            Ok(requested)
+        } else {
+            Err(anyhow!("chrome never announced a DevTools endpoint"))
+        }
+    }
+
