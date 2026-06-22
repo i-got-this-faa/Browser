@@ -95,3 +95,61 @@ impl CefWebView {
         self.with_buffer(true, f);
     }
 
+    fn with_buffer(&self, popup: bool, f: impl FnOnce(&[u8], i32, i32, &[[i32; 4]])) {
+        let mut w: i32 = 0;
+        let mut h: i32 = 0;
+        // SAFETY: paired lock/unlock around the read; the pointer is valid
+        // while the shim's buffer mutex is held.
+        let (ptr, len) = unsafe {
+            let ptr = if popup {
+                ffi::cef_view_lock_popup(self.view, &mut w, &mut h)
+            } else {
+                ffi::cef_view_lock_frame(self.view, &mut w, &mut h)
+            };
+            if ptr.is_null() || w <= 0 || h <= 0 {
+                if popup {
+                    ffi::cef_view_unlock_popup(self.view);
+                } else {
+                    ffi::cef_view_unlock_frame(self.view);
+                }
+                (std::ptr::null(), 0usize)
+            } else {
+                (ptr, (w as usize) * (h as usize) * 4)
+            }
+        };
+        if ptr.is_null() {
+            return;
+        }
+        let rects = self.damage.lock().unwrap().take().unwrap_or_default();
+        // SAFETY: len matches the shim buffer while its mutex is held.
+        let pixels = unsafe { std::slice::from_raw_parts(ptr, len) };
+        f(pixels, w, h, &rects);
+        // SAFETY: releases the lock taken above.
+        unsafe {
+            if popup {
+                ffi::cef_view_unlock_popup(self.view);
+            } else {
+                ffi::cef_view_unlock_frame(self.view);
+            }
+        }
+    }
+
+    pub fn popup_visible(&self) -> bool {
+        unsafe { ffi::cef_view_popup_visible(self.view) != 0 }
+    }
+
+    pub fn popup_rect(&self) -> [i32; 4] {
+        let mut out = [0i32; 4];
+        unsafe { ffi::cef_view_popup_rect(self.view, out.as_mut_ptr()) };
+        out
+    }
+
+    fn destroy_once(&self) {
+        if !self.destroyed.swap(true, Ordering::SeqCst) {
+            registry().lock().unwrap().remove(&self.abi_id);
+            // SAFETY: exactly one destroy per live view.
+            unsafe { ffi::cef_view_destroy(self.view) };
+        }
+    }
+}
+
