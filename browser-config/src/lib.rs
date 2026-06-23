@@ -418,3 +418,55 @@ mod tests {
         assert!(cfg.hook("nothing").is_none());
     }
 
+    #[test]
+    fn syntax_error_is_reported() {
+        let err = Config::parse("return {").unwrap_err();
+        assert!(err.to_string().contains("did not run"));
+    }
+
+    #[test]
+    fn non_table_return_is_rejected() {
+        assert!(Config::parse("return 42").is_err());
+    }
+
+    #[test]
+    fn fraction_is_clamped() {
+        let cfg = Config::parse("return { behavior = { page_width_fraction = 9.5 } }").unwrap();
+        assert_eq!(cfg.behavior.page_width_fraction, 1.0);
+        let cfg = Config::parse("return { behavior = { page_width_fraction = 0.01 } }").unwrap();
+        assert_eq!(cfg.behavior.page_width_fraction, 0.2);
+    }
+
+    #[test]
+    fn malformed_key_entry_names_the_key() {
+        let err = Config::parse("return { keys = { { command = \"x\" } } }").unwrap_err();
+        assert!(err.to_string().contains("keys"));
+    }
+
+    #[test]
+    fn default_keys_are_wellformed() {
+        for k in default_keys() {
+            assert!(!k.key.is_empty() && !k.command.is_empty());
+        }
+        // Every default key must be unique.
+        let mut seen = std::collections::HashSet::new();
+        for k in default_keys() {
+            assert!(seen.insert(k.key.clone()), "duplicate default binding {}", k.key);
+        }
+    }
+
+    #[test]
+    fn ensure_default_config_writes_once() {
+        let dir = std::env::temp_dir().join(format!(
+            "strip-config-test-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .subsec_nanos()
+        ));
+        let path = dir.join("browser.lua");
+        assert!(ensure_default_config(&path, "return {}").unwrap());
+        assert!(!ensure_default_config(&path, "return {}").unwrap());
+        std::fs::remove_dir_all(&dir).ok();
+    }
+}
