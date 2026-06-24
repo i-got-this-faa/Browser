@@ -358,3 +358,29 @@ fn collect_requests(ret: MultiValue) -> Vec<Request> {
 ///   { cmd = "page.new_beside" }         named
 ///   { "page.navigate", "https://…" }    with string payload
 ///   { cmd = "workspace.focus", arg = 2 }
+fn lua_value_to_request(v: Value) -> Result<Option<Request>> {
+    let Value::Table(t) = v else {
+        return Ok(None);
+    };
+    // Named form.
+    let named: Option<String> = t.get("cmd").ok();
+    if let Some(cmd) = named {
+        let arg: Option<String> = t.get("arg").ok().flatten();
+        return Ok(request_with_arg(&cmd, arg.as_deref()));
+    }
+    // Positional form. `{ "page.navigate", "url" }` passes the payload as
+    // the arg; `{ "page", "new_beside" }` joins into "page.new_beside".
+    let cmd: Option<String> = t.get(1).ok().flatten();
+    let Some(cmd) = cmd else {
+        return Ok(None);
+    };
+    let payload: Option<String> = t.get(2).ok().flatten();
+    if let Some(r) = request_with_arg(&cmd, payload.as_deref()) {
+        return Ok(Some(r));
+    }
+    if let Some(p) = payload.as_deref() {
+        return Ok(request_with_arg(&format!("{cmd}.{p}"), None));
+    }
+    Ok(None)
+}
+
