@@ -631,3 +631,18 @@ impl Shell {
         cx.notify();
     }
 
+    // -- control socket helpers ----------------------------------------------
+
+    /// Insert one character into the active text overlay (prompt/palette).
+    /// Submit the prompt with its current text (control-socket path).
+    pub fn submit_prompt_text(&mut self, cx: &mut Context<Self>) {
+        if let Overlay::Prompt { text, .. } = &mut self.overlay {
+            let t = std::mem::take(text);
+            self.submit_prompt(t, cx);
+        } else {
+            cx.notify();
+        }
+    }
+
+    /// Replace the prompt's contents (control-socket path). Typing into a
+    /// fresh address bar replaces its prefill, so the socket does too.
