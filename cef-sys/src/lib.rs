@@ -19,3 +19,12 @@ pub const CEF_EV_CLOSED: u32 = 6;
 
 #[repr(C)]
 #[derive(Copy, Clone)]
+pub struct CefEvent {
+    pub kind: u32,
+    pub view_id: u64,
+    pub w: i32,
+    pub h: i32,
+    pub rects: [[i32; 4]; 16],
+    pub nrects: c_int,
+    pub loading: c_int,
+    pub str_: *const c_char,
