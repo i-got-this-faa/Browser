@@ -356,3 +356,12 @@ struct Client : public CefClient {
   CefRefPtr<FocusHandler> focus;
  private:
   IMPLEMENT_REFCOUNTING(Client);
+};
+
+std::mutex g_views_mu;
+std::map<uint64_t, ViewRef> g_views;
+
+// ---------------------------------------------------------------------------
+// App / engine
+// ---------------------------------------------------------------------------
+
