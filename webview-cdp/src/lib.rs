@@ -454,3 +454,9 @@ impl ChromeEngine {
         }
     }
 
+    /// Query /json/list. Also used by tests against a fake CDP server.
+    pub fn list_targets(port: u16) -> Result<Vec<DevtoolsTarget>> {
+        let mut stream = TcpStream::connect(("127.0.0.1", port))
+            .with_context(|| format!("connect to {port} for /json/list"))?;
+        stream.set_read_timeout(Some(Duration::from_secs(5))).ok();
+        let req = format!(
