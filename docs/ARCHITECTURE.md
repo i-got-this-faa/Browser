@@ -54,3 +54,10 @@ Chrome binary with Helium/Chromium built from source (privacy patches,
 uBlock integration). `webview-cdp` already isolates this behind the
 `WebView` trait; the Helium backend implements the same trait.
 
+## Frame path
+
+1. Engine pump (16 ms timer in `Shell`) drains `WebViewEvent`s.
+2. `Page.startScreencast` PNG frames land in `PageSlot.frame_png`.
+3. `render()` positions one `img(ImageSource::Render)` per page at its
+   strip geometry; PNG is decoded once to BGRA (`RenderImage` format).
+
