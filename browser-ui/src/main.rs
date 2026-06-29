@@ -646,3 +646,12 @@ impl Shell {
 
     /// Replace the prompt's contents (control-socket path). Typing into a
     /// fresh address bar replaces its prefill, so the socket does too.
+    fn handle_palette_key(
+        &mut self,
+        binding: &str,
+        filter: &str,
+        ks: &gpui::Keystroke,
+        cx: &mut Context<Self>,
+    ) {
+        let matches = self.palette_matches(filter);
+        let sel = match &self.overlay {
