@@ -460,3 +460,13 @@ impl ChromeEngine {
             .with_context(|| format!("connect to {port} for /json/list"))?;
         stream.set_read_timeout(Some(Duration::from_secs(5))).ok();
         let req = format!(
+fn log_step(msg: &str) {
+    #[cfg(feature = "debug-spawn")]
+    eprintln!("[cdp {msg}]");
+    #[cfg(not(feature = "debug-spawn"))]
+    let _ = msg;
+}
+
+/// Read one full HTTP response. Chrome's DevTools server keeps the socket
+/// open even with `Connection: close`, so we must stop exactly at
+/// `Content-Length` instead of reading to EOF.
