@@ -17,3 +17,9 @@ rm -f "$TRACE" "$TRACE".log "$SOCK"
 STRIP_TRACE="$TRACE" RUST_LOG=warn "$ROOT/target/debug/browser" >"$LOG" 2>&1 &
 BROWSER_PID=$!
 
+cleanup() {
+  kill "$BROWSER_PID" 2>/dev/null || true
+}
+trap cleanup EXIT
+
+# Wait for the control socket (CEF spawn can take a few seconds).
