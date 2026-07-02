@@ -365,3 +365,28 @@ std::map<uint64_t, ViewRef> g_views;
 // App / engine
 // ---------------------------------------------------------------------------
 
+class StripApp : public CefApp, public CefBrowserProcessHandler {
+ public:
+  StripApp() = default;
+
+  void OnBeforeCommandLineProcessing(const CefString&,
+                                     CefRefPtr<CefCommandLine> cl) override {
+    // Privacy/hardening posture (Helium-family defaults; prebuilt binaries
+    // carry no Helium source patches — see decisions.tsv).
+    cl->AppendSwitchWithValue("force-color-profile", "srgb");
+    cl->AppendSwitch("disable-features=Translate,BackForwardCache");
+    cl->AppendSwitch("mute-audio");
+    cl->AppendSwitch("disable-background-timer-throttling");
+  }
+
+  void OnScheduleMessagePumpWork(int64_t) override {
+    // multi_threaded_message_loop: CEF owns its pump; nothing to do.
+  }
+
+  CefRefPtr<CefBrowserProcessHandler> GetBrowserProcessHandler() override {
+    return this;
+  }
+
+ private:
+  IMPLEMENT_REFCOUNTING(StripApp);
+  DISALLOW_COPY_AND_ASSIGN(StripApp);
