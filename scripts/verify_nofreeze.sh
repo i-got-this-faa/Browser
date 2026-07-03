@@ -10,3 +10,7 @@ sleep 1
 
 env STRIP_TRACE=/tmp/trace-freeze.jsonl "$ROOT/target/debug/browser" >/tmp/freeze.log 2>&1 &
 PID=$!
+for i in $(seq 1 100); do [ -S "$SOCK" ] && break; sleep 0.2; done
+[ -S "$SOCK" ] || { echo "FAIL: no socket"; exit 1; }
+sleep 3
+
