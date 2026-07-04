@@ -384,3 +384,13 @@ fn lua_value_to_request(v: Value) -> Result<Option<Request>> {
     Ok(None)
 }
 
+fn request_with_arg(cmd: &str, arg: Option<&str>) -> Option<Request> {
+    match cmd {
+        // Free-string commands take the payload as their arg.
+        "page.navigate" => Some(Request::Navigate(arg?.to_string())),
+        "lua.exec" => Some(Request::ExecLua(arg?.to_string())),
+        _ => Request::from_command(cmd, arg),
+    }
+}
+
+#[cfg(test)]
