@@ -240,3 +240,22 @@ fn focus_neighbor(state: &mut BrowserState, vp: &Viewport, right: bool) {
     }
 }
 
+fn move_active(state: &mut BrowserState, _vp: &Viewport, right: bool) {
+    let Some(active) = state.active_id() else { return };
+    let pages = state.strip.visible();
+    let Some(idx) = pages.iter().position(|p| p.id == active) else { return };
+    let target = if right {
+        match pages.get(idx + 1) {
+            Some(p) => p.x,
+            None => return,
+        }
+    } else {
+        match idx.checked_sub(1).and_then(|i| pages.get(i)) {
+            Some(p) => p.x,
+            None => return,
+        }
+    };
+    state.strip.move_page(active, target);
+}
+
+#[cfg(test)]
