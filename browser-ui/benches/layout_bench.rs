@@ -21,3 +21,25 @@ fn strip_with(n: usize) -> Strip {
     s
 }
 
+fn bench(name: &str, pages: usize, iters: u32) {
+    let strip = strip_with(pages);
+    let vp = Viewport { width: 1280.0, height: 720.0 };
+    let start = std::time::Instant::now();
+    let mut sink = 0.0f32;
+    for _ in 0..iters {
+        let geos = frame_geometries_scaled(&strip, &vp, 500.0, 0.78, 1.0);
+        // Consume a value so the work is not optimized away.
+        if let Some((_, g)) = geos.last() {
+            sink += g.rel_x + g.width;
+        }
+        // visible() is called by strip_right/strip_left/render per frame too.
+        let vis = strip.visible();
+        sink += vis.len() as f32;
+    }
+    let total = start.elapsed();
+    println!(
+        "{name:<28} {pages:>5} pages  {iters:>7} iters  {:>10.1} ns/iter  (sink {sink:.0})",
+        total.as_nanos() as f64 / iters as f64
+    );
+}
+
