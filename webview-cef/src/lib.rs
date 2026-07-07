@@ -153,3 +153,53 @@ impl CefWebView {
     }
 }
 
+impl WebView for CefWebView {
+    fn id(&self) -> WebViewId {
+        self.id
+    }
+
+    fn send(&self, cmd: WebViewCommand) -> Result<()> {
+        match cmd {
+            WebViewCommand::Navigate(url) => {
+                let c = CString::new(url)?;
+                unsafe { ffi::cef_view_navigate(self.view, c.as_ptr()) };
+            }
+            WebViewCommand::Reload => unsafe { ffi::cef_view_reload(self.view, 0) },
+            WebViewCommand::HardReload => unsafe { ffi::cef_view_reload(self.view, 1) },
+            WebViewCommand::GoBack => unsafe { ffi::cef_view_back(self.view) },
+            WebViewCommand::GoForward => unsafe { ffi::cef_view_forward(self.view) },
+            WebViewCommand::Resize { width, height } => unsafe {
+                ffi::cef_view_resize(self.view, width as i32, height as i32);
+            },
+            WebViewCommand::SetFocus(f) => unsafe {
+                ffi::cef_view_focus(self.view, f as c_int);
+            },
+            // Background pages must not composite (DoD) -> WasHidden.
+            WebViewCommand::SetHidden(h) => unsafe {
+                ffi::cef_view_hidden(self.view, h as c_int);
+            },
+            WebViewCommand::Mouse { x, y, kind, button, mods: _ } => {
+                let k = match kind {
+                    MouseKind::Move => 0,
+                    MouseKind::Down => 1,
+                    MouseKind::Up => 2,
+                };
+                let b = match button {
+                    MouseButton::Left => 0,
+                    MouseButton::Middle => 1,
+                    MouseButton::Right => 2,
+                };
+                unsafe { ffi::cef_view_mouse(self.view, k, b, x, y, 1) };
+            }
+            WebViewCommand::Scroll { x, y, dx, dy } => unsafe {
+                ffi::cef_view_wheel(self.view, x, y, dx, dy);
+            },
+            WebViewCommand::Keys(keys) => {
+                for k in &keys {
+                    dispatch_key(self.view, k);
+                }
+            }
+        }
+        Ok(())
+    }
+
