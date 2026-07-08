@@ -655,3 +655,14 @@ impl Shell {
     ) {
         let matches = self.palette_matches(filter);
         let sel = match &self.overlay {
+    /// Move the palette selection by `delta`, clamped to the rows actually
+    /// rendered (the visible list is capped at PALETTE_VISIBLE).
+    fn palette_move(&mut self, delta: i32) {
+        let filter = match &self.overlay {
+            Overlay::Palette { text, .. } => text.clone(),
+            _ => return,
+        };
+        let n = self.palette_matches(&filter).len().min(PALETTE_VISIBLE);
+        if n == 0 {
+            return;
+        }
