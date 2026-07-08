@@ -470,3 +470,16 @@ fn log_step(msg: &str) {
 /// Read one full HTTP response. Chrome's DevTools server keeps the socket
 /// open even with `Connection: close`, so we must stop exactly at
 /// `Content-Length` instead of reading to EOF.
+fn urlencode(s: &str) -> String {
+    let mut out = String::new();
+    for b in s.bytes() {
+        match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                out.push(b as char)
+            }
+            _ => out.push_str(&format!("%{b:02X}")),
+        }
+    }
+    out
+}
+
