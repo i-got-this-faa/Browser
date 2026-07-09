@@ -390,3 +390,10 @@ class StripApp : public CefApp, public CefBrowserProcessHandler {
  private:
   IMPLEMENT_REFCOUNTING(StripApp);
   DISALLOW_COPY_AND_ASSIGN(StripApp);
+};
+
+std::atomic<bool> g_started{false};
+CefRefPtr<StripApp> g_app;
+
+}  // namespace
+
