@@ -50,3 +50,11 @@ sleep 2
 CAGE_DISPLAY="$(find "$XDG_RUNTIME_DIR" -maxdepth 1 -name 'wayland-*' ! -name '*.lock' -printf '%f\n' | sort -V | tail -1)"
 export WAYLAND_DISPLAY="$CAGE_DISPLAY"
 echo "== cage socket: $CAGE_DISPLAY =="
+CAGE_STAMP=$(stat -c %Y "$XDG_RUNTIME_DIR/$CAGE_DISPLAY")
+
+echo "== starting nested niri =="
+niri -c "$NIRI_CONFIG" >"$RUN_DIR/niri.log" 2>&1 &
+NIRI_PID=$!
+
+# Nested niri creates its own wayland socket: wait for one newer than cage's.
+NESTED_DISPLAY=""
