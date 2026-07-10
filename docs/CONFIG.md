@@ -56,3 +56,20 @@ focus.left           page.close          workspace.prev (arg = n)
                                          overview.toggle
 ```
 
+## commands
+
+```lua
+commands = {
+  ["my.hackernews"] = {
+    desc = "Open Hacker News beside this page",
+    run = function()
+      browser.request { "page.new_beside" }
+      return { "page.navigate", "https://news.ycombinator.com" }
+    end,
+  },
+}
+```
+
+`run` may return requests or emit them via `browser.request`. Run from
+the palette (`ctrl+p`) or the prompt (`:my.hackernews`).
+
