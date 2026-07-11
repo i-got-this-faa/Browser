@@ -394,3 +394,36 @@ fn request_with_arg(cmd: &str, arg: Option<&str>) -> Option<Request> {
 }
 
 #[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn host_with(src: &str) -> LuaHost {
+        let mut host = LuaHost::new();
+        let mut out = Vec::new();
+        host.load_config(src, &mut out).expect("config loads");
+        host
+    }
+
+    #[test]
+    fn command_round_trip() {
+        for (name, _) in Request::all_commands() {
+            let arg = match *name {
+                "workspace.focus" | "page.to_workspace" => Some("2"),
+                "page.navigate" => Some("https://x.test"),
+                _ => None,
+            };
+            assert!(
+                Request::from_command(name, arg).is_some(),
+                "built-in `{name}` must parse"
+            );
+        }
+        assert!(Request::from_command("nope", None).is_none());
+        assert_eq!(
+            Request::from_command("workspace.focus", Some("3")),
+            Some(Request::WorkspaceFocus(3))
+        );
+        // Missing arg is a None, not a panic.
+        assert!(Request::from_command("workspace.focus", None).is_none());
+    }
+
+    #[test]
