@@ -666,3 +666,6 @@ impl Shell {
         if n == 0 {
             return;
         }
+    /// Window-space y of the inner viewport's top edge: the page bar height
+    /// when the bar is shown, else 0. Layout runs in inner coordinates and
+    /// drawing/hit-testing translate through this.
