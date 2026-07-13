@@ -134,3 +134,29 @@ impl BrowserState {
 }
 
 #[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn vp() -> Viewport {
+        Viewport { width: 1000.0, height: 800.0 }
+    }
+
+    #[test]
+    fn add_close_cycle_keeps_focus_sane() {
+        let mut s = BrowserState::default();
+        let vp = vp();
+        let a = s.add_page("a", &vp);
+        let b = s.add_page("b", &vp);
+        let c = s.add_page("c", &vp);
+        assert_eq!(s.active_id(), Some(c));
+        assert_eq!(s.strip.page(b).unwrap().x, s.strip.page(a).unwrap().width + s.strip.gap);
+        s.close_page(c, &vp);
+        assert_eq!(s.active_id(), Some(b), "right neighbor becomes active");
+        s.close_page(b, &vp);
+        assert_eq!(s.active_id(), Some(a));
+        s.close_page(a, &vp);
+        assert_eq!(s.active_id(), None);
+        assert!(s.slots.is_empty());
+    }
+
+    #[test]
