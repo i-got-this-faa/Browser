@@ -397,3 +397,12 @@ CefRefPtr<StripApp> g_app;
 
 }  // namespace
 
+// ---------------------------------------------------------------------------
+// C ABI
+// ---------------------------------------------------------------------------
+
+int cef_early_process(int argc, char** argv) {
+  CefMainArgs args(argc, argv);
+  // Heap-allocated: CefExecuteProcess drops the last ref on return, which
+  // runs `delete this` (IMPLEMENT_REFCOUNTING). A `static` StripApp would be
+  // freed as if it were heap memory -> free(): invalid size.
