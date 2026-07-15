@@ -91,3 +91,40 @@ impl EngineController {
             .map(PathBuf::from)
             .unwrap_or_else(|_| PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../vendor/cef"));
         let resources = root.join("Resources");
+    fn spawn_cdp(max_retries: u32) -> Result<Self> {
+        let chrome = webview_cdp::which_chrome().ok_or_else(|| {
+            anyhow!("no Chromium engine found (tried google-chrome, chromium, chromium-browser)")
+        })?;
+        let mut last_err = None;
+        for attempt in 0..max_retries {
+            let data_dir = std::env::temp_dir().join(format!(
+                "strip-browser-engine-{}-{attempt}",
+                std::process::id()
+            ));
+            match webview_cdp::ChromeEngine::spawn(&chrome, 0, &data_dir) {
+                Ok(engine) => {
+                    return Ok(Self {
+                        shared: Arc::new(Mutex::new(EngineShared::default())),
+                        backend: Arc::new(AtomicU8::new(BACKEND_CDP)),
+                        dead: Arc::new(AtomicBool::new(false)),
+                        cdp_engine: Some(Arc::new(engine)),
+                        cdp_data_dir: Some(data_dir),
+                    });
+                }
+                Err(e) => {
+                    eprintln!("engine spawn attempt {attempt} failed: {e}");
+                    last_err = Some(e);
+                    std::thread::sleep(std::time::Duration::from_millis(300));
+                }
+            }
+        }
+        Err(last_err.unwrap_or_else(|| anyhow!("engine spawn failed")))
+    }
+
+    pub fn backend(&self) -> Backend {
+        match self.backend.load(std::sync::atomic::Ordering::SeqCst) {
+            BACKEND_CEF => Backend::Cef,
+            _ => Backend::Cdp,
+        }
+    }
+
