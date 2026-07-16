@@ -669,3 +669,52 @@ impl Shell {
     /// Window-space y of the inner viewport's top edge: the page bar height
     /// when the bar is shown, else 0. Layout runs in inner coordinates and
     /// drawing/hit-testing translate through this.
+    fn focus_page(&mut self, id: u64, cx: &mut Context<Self>) {
+        if self.state.strip.active_page != Some(id) {
+            self.state.focus_page(id, &self.viewport);
+            self.scroll_target =
+                Some(browser_layout::scroll_to_page(&self.state.strip, &self.viewport, id));
+            let payload = serde_json::json!({ "id": id });
+            self.fire_hook("page_focused", Some(payload), cx);
+            self.sync_hidden_and_focus();
+        }
+    }
+
+    /// Background pages must not composite (DoD): pages outside the active
+    /// workspace get WasHidden(true); the focused page gets input focus.
+    fn sync_hidden_and_focus(&mut self) {
+        let active_ws = self.state.strip.active_workspace;
+        let active = self.state.strip.active_page;
+        for page in &self.state.strip.pages {
+            let hidden = page.workspace != active_ws;
+            if self.focus_cache.get(&page.id) != Some(&hidden) {
+                self.engine.set_hidden(page.id, hidden);
+                self.focus_cache.insert(page.id, hidden);
+            }
+        }
+        if let Some(a) = active {
+            self.engine.set_focus(a, true);
+        }
+    }
+
+    fn on_mouse_down(&mut self, ev: &MouseDownEvent, _window: &mut Window, cx: &mut Context<Self>) {
+        if let Some((id, local)) = self.page_under(ev.position) {
+            self.focus_page(id, cx);
+            let button = match ev.button {
+                MouseButton::Left => webview_cdp::MouseButton::Left,
+                MouseButton::Middle => webview_cdp::MouseButton::Middle,
+                MouseButton::Right => webview_cdp::MouseButton::Right,
+                MouseButton::Navigate(_) => return,
+            };
+            self.engine.mouse(
+                id,
+                f32::from(local.x) as i32,
+                f32::from(local.y) as i32,
+                webview_cdp::MouseKind::Down,
+                button,
+                cdp_mods(&ev.modifiers),
+            );
+            cx.notify();
+        }
+    }
+
