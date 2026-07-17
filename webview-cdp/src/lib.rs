@@ -488,3 +488,9 @@ fn urlencode(s: &str) -> String {
 // ---------------------------------------------------------------------------
 
 /// A single web surface backed by one CDP target.
+pub struct CdpWebView {
+    id: WebViewId,
+    session: Arc<CdpSession>,
+    events: Receiver<WebViewEvent>,
+}
+
