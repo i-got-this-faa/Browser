@@ -203,3 +203,16 @@ impl WebView for CefWebView {
         Ok(())
     }
 
+    fn events(&self) -> &Receiver<WebViewEvent> {
+        &self.events
+    }
+
+    fn close(self: Box<Self>) -> Result<()> {
+        if let Some(tx) = self.sink_tx.as_ref() {
+            let _ = tx.send(WebViewEvent::Closed);
+        }
+        self.destroy_once();
+        Ok(())
+    }
+}
+
