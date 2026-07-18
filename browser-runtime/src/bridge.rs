@@ -34,3 +34,17 @@ pub enum HostEvent {
     ConfigReloaded,
 }
 
+impl HostEvent {
+    /// Hook name for this event in browser.lua's `events` table.
+    pub fn hook_name(&self) -> &'static str {
+        match self {
+            HostEvent::PageCreated { .. } => "page_created",
+            HostEvent::PageClosed { .. } => "page_closed",
+            HostEvent::PageFocused { .. } => "page_focused",
+            HostEvent::PageNavigated { .. } => "page_navigated",
+            HostEvent::PageTitleChanged { .. } => "page_title_changed",
+            HostEvent::WorkspaceChanged { .. } => "workspace_changed",
+            HostEvent::ConfigReloaded => "config_reloaded",
+        }
+    }
+}
