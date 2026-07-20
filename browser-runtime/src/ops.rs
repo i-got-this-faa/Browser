@@ -259,3 +259,60 @@ fn move_active(state: &mut BrowserState, _vp: &Viewport, right: bool) {
 }
 
 #[cfg(test)]
+mod tests {
+    use super::*;
+    use browser_layout::Viewport;
+
+    fn vp() -> Viewport {
+        Viewport { width: 1000.0, height: 800.0 }
+    }
+
+    fn setup() -> (BrowserState, Viewport) {
+        (BrowserState::default(), vp())
+    }
+
+    #[test]
+    fn navigate_sets_url_and_effects() {
+        let (mut s, vp) = setup();
+        let id = s.add_page("about:blank", &vp);
+        let mut fx = Effects::default();
+        apply(&mut s, &vp, Request::Navigate("https://e.test".into()), &mut fx);
+        assert_eq!(fx.navigate, vec![(id, "https://e.test".to_string())]);
+        assert_eq!(s.strip.page(id).unwrap().url, "https://e.test");
+    }
+
+    #[test]
+    fn close_emits_engine_effect() {
+        let (mut s, vp) = setup();
+        let a = s.add_page("a", &vp);
+        let c = s.add_page("c", &vp);
+        let mut fx = Effects::default();
+        apply(&mut s, &vp, Request::PageClose, &mut fx);
+        assert_eq!(fx.close, vec![c]);
+        assert_eq!(s.active_id(), Some(a));
+    }
+
+    #[test]
+    fn page_new_beside_prompts_and_spawns() {
+        let (mut s, vp) = setup();
+        s.add_page("a", &vp);
+        let mut fx = Effects::default();
+        apply(&mut s, &vp, Request::PageNewBeside, &mut fx);
+        assert_eq!(fx.spawn.len(), 1);
+        assert!(fx.prompt_open.is_some());
+        assert_eq!(s.strip.pages.len(), 2);
+    }
+
+    #[test]
+    fn focus_moves_along_strip() {
+        let (mut s, vp) = setup();
+        let a = s.add_page("a", &vp);
+        let c = s.add_page("c", &vp);
+        s.focus_page(a, &vp);
+        let mut fx = Effects::default();
+        apply(&mut s, &vp, Request::FocusRight, &mut fx);
+        assert_eq!(s.active_id(), Some(c));
+        apply(&mut s, &vp, Request::FocusLeft, &mut fx);
+        assert_eq!(s.active_id(), Some(a));
+    }
+
