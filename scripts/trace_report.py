@@ -27,3 +27,10 @@ def load(path):
     return rows
 
 
+def pct(sorted_vals, p):
+    if not sorted_vals:
+        return 0
+    idx = min(len(sorted_vals) - 1, int(len(sorted_vals) * p))
+    return sorted_vals[idx]
+
+
