@@ -406,3 +406,28 @@ int cef_early_process(int argc, char** argv) {
   // Heap-allocated: CefExecuteProcess drops the last ref on return, which
   // runs `delete this` (IMPLEMENT_REFCOUNTING). A `static` StripApp would be
   // freed as if it were heap memory -> free(): invalid size.
+int cef_engine_start(const char* subprocess, const char* resources,
+                     const char* locales, const char* cache) {
+  bool expected = false;
+  if (!g_started.compare_exchange_strong(expected, true)) return 0;
+
+  g_app = new StripApp();
+  CefMainArgs args(0, nullptr);
+  CefSettings settings;
+  settings.multi_threaded_message_loop = true;   // CEF owns the UI thread
+  settings.windowless_rendering_enabled = true;
+  settings.no_sandbox = true;
+  settings.log_severity = LOGSEVERITY_WARNING;
+  if (subprocess && *subprocess)
+    CefString(&settings.browser_subprocess_path).FromString(subprocess);
+  if (resources && *resources)
+    CefString(&settings.resources_dir_path).FromString(resources);
+  if (locales && *locales)
+    CefString(&settings.locales_dir_path).FromString(locales);
+  if (cache && *cache)
+    CefString(&settings.cache_path).FromString(cache);
+  CefString(&settings.user_agent).FromASCII(CEF_UA);
+  if (!CefInitialize(args, settings, g_app, nullptr)) return -1;
+  return 0;
+}
+
