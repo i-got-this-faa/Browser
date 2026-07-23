@@ -61,3 +61,7 @@ pub fn poll(shell: &mut Shell, listener: &UnixListener, cx: &mut gpui::Context<S
             Err(_) => break,
         }
     }
+}
+
+
+
