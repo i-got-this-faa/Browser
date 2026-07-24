@@ -45,3 +45,42 @@ fn write_line(file: &Mutex<File>, line: &str) {
     }
 }
 
+impl<S> Layer<S> for JsonlLayer
+where
+    S: Subscriber,
+{
+    fn on_new_span(&self, attrs: &Attributes<'_>, id: &Id, _ctx: Context<'_, S>) {
+        let name = attrs.metadata().name();
+        if let Ok(mut spans) = self.spans.lock() {
+            spans.insert(id.into_u64(), (name, unix_us()));
+        }
+    }
+
+    fn on_record(&self, _span: &Id, _values: &Record<'_>, _ctx: Context<'_, S>) {}
+
+    fn on_enter(&self, _id: &Id, _ctx: Context<'_, S>) {}
+
+    fn on_exit(&self, _id: &Id, _ctx: Context<'_, S>) {}
+
+    fn on_close(&self, id: Id, _ctx: Context<'_, S>) {
+        let entry = self
+            .spans
+            .lock()
+            .ok()
+            .and_then(|mut s| s.remove(&id.into_u64()));
+        let Some((name, start_us)) = entry else { return };
+        let Some(file) = self.file.as_ref() else { return };
+        let dur = unix_us().saturating_sub(start_us);
+        let line = format!(
+            "{{\"t\":{start_us},\"ph\":\"X\",\"name\":\"{name}\",\"dur_us\":{dur},\"tid\":\"{}\"}}\n",
+            thread_label(),
+        );
+        write_line(file, &line);
+    }
+
+    fn enabled(&self, meta: &tracing::Metadata<'_>, _ctx: Context<'_, S>) -> bool {
+        // Only our own perf events/spans: other crates (zbus, etc.) also use
+        // tracing and must not flood the audit trace.
+        self.file.is_some() && meta.target() == "perf"
+    }
+
