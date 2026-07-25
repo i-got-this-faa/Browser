@@ -427,3 +427,50 @@ mod tests {
     }
 
     #[test]
+    fn lua_request_positional_and_named() {
+        let mut host = LuaHost::new();
+        let mut out = Vec::new();
+        host.load_config(
+            r#"
+            browser.request { "page", "new_beside" }
+            browser.request { cmd = "workspace.focus", arg = 2 }
+            browser.request { "page.navigate", "https://example.com" }
+            return {}
+        "#,
+            &mut out,
+        )
+        .unwrap();
+        assert_eq!(
+            out,
+            vec![
+                Request::PageNewBeside,
+                Request::WorkspaceFocus(2),
+                Request::Navigate("https://example.com".into()),
+            ]
+        );
+    }
+
+    #[test]
+    fn config_commands_run_and_return_requests() {
+        let mut host = host_with(
+            r#"
+            return {
+                commands = {
+                    ["my.open"] = { desc = "open", run = function()
+                        browser.request { "page.navigate", "https://open.test" }
+                        return { "page", "new_beside" }
+                    end },
+                },
+            }
+        "#,
+        );
+        let reqs = host.call_command("my.open", None).unwrap();
+        assert_eq!(
+            reqs,
+            vec![
+                Request::Navigate("https://open.test".into()),
+                Request::PageNewBeside
+            ]
+        );
+    }
+
