@@ -494,3 +494,9 @@ pub struct CdpWebView {
     events: Receiver<WebViewEvent>,
 }
 
+impl CdpWebView {
+    fn attach(session: Arc<CdpSession>, events: Receiver<WebViewEvent>) -> Result<Self> {
+        session.call("Page.enable", json!({}))?;
+        session.call("Emulation.setFocusEmulationEnabled", json!({ "enabled": true }))?;
+        // NOTE: format/quality are flat CDP params, not a nested object.
+        session.call(
