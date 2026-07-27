@@ -718,3 +718,44 @@ impl Shell {
         }
     }
 
+    fn on_mouse_up(&mut self, ev: &MouseUpEvent, _window: &mut Window, _cx: &mut Context<Self>) {
+        if let Some((id, local)) = self.page_under(ev.position) {
+            let button = match ev.button {
+                MouseButton::Left => webview_cdp::MouseButton::Left,
+                MouseButton::Middle => webview_cdp::MouseButton::Middle,
+                MouseButton::Right => webview_cdp::MouseButton::Right,
+                MouseButton::Navigate(_) => return,
+            };
+            self.engine.mouse(
+                id,
+                f32::from(local.x) as i32,
+                f32::from(local.y) as i32,
+                webview_cdp::MouseKind::Up,
+                button,
+                cdp_mods(&ev.modifiers),
+            );
+        }
+    }
+
+    fn on_mouse_move(&mut self, ev: &MouseMoveEvent, _window: &mut Window, _cx: &mut Context<Self>) {
+        if let Some((id, local)) = self.page_under(ev.position) {
+            self.engine.mouse(
+                id,
+                f32::from(local.x) as i32,
+                f32::from(local.y) as i32,
+                webview_cdp::MouseKind::Move,
+                webview_cdp::MouseButton::Left,
+                cdp_mods(&ev.modifiers),
+            );
+        }
+    }
+
+    fn on_scroll(&mut self, ev: &ScrollWheelEvent, _window: &mut Window, _cx: &mut Context<Self>) {
+        if let Some((id, local)) = self.page_under(ev.position) {
+            let d = ev.delta.pixel_delta(px(20.0));
+            self.engine
+                .scroll(id, f32::from(local.x) as i32, f32::from(local.y) as i32, f32::from(d.x) as i32, f32::from(d.y) as i32);
+        }
+    }
+}
+
