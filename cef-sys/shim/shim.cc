@@ -431,3 +431,32 @@ int cef_engine_start(const char* subprocess, const char* resources,
   return 0;
 }
 
+void* cef_view_create(uint64_t id, const char* url, int32_t w, int32_t h) {
+  ViewRef v = new View();
+  v->id = id;
+  v->w = w;
+  v->h = h;
+  CefRefPtr<Client> client = new Client(v);
+  {
+    std::lock_guard<std::mutex> lk(g_views_mu);
+    g_views[id] = v;
+  }
+
+  CefWindowInfo info;
+  info.SetAsWindowless(cef_window_handle_t());
+  CefBrowserSettings bs;
+  bs.windowless_frame_rate = 60;
+
+  CefPostTask(TID_UI, base::BindOnce(
+      [](CefRefPtr<Client> client, CefWindowInfo info,
+         CefBrowserSettings bs, std::string url) {
+        CefBrowserHost::CreateBrowser(info, client, url, bs, nullptr,
+                                      nullptr);
+      },
+      client, info, bs, std::string(url)));
+
+  // Ownership: g_views holds the only view ref for Rust's purposes; the raw
+  // pointer stays valid until cef_view_destroy erases it from the map.
+  return v.get();
+}
+
