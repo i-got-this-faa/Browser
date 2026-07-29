@@ -61,3 +61,11 @@ uBlock integration). `webview-cdp` already isolates this behind the
 3. `render()` positions one `img(ImageSource::Render)` per page at its
    strip geometry; PNG is decoded once to BGRA (`RenderImage` format).
 
+## Input path
+
+1. GPUI key events → `keystroke_string` (`ctrl+shift+t` form).
+2. Overlay first (prompt/palette capture keys), then config keybindings,
+   then leftovers forwarded to the page via `Input.dispatchKeyEvent`.
+3. Mouse: page hit-test from strip geometry → page-local coordinates →
+   `Input.dispatchMouseEvent`; wheel → `mouseWheel`.
+
