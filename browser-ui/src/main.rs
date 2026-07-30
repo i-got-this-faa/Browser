@@ -759,3 +759,16 @@ impl Shell {
     }
 }
 
+impl Render for Shell {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        // The shell always holds window focus: overlays route keys first,
+        // everything unbound forwards to the page.
+        if !self.focus.is_focused(window) {
+            window.focus(&self.focus);
+        }
+
+        // Keep the layout viewport in sync with the real window size. The bars
+        // reserve their heights from it so frames sit *between* the bars.
+        let vs = window.viewport_size();
+        let new_vp = Viewport {
+            width: vs.width.into(),
