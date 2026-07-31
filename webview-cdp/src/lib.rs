@@ -500,3 +500,8 @@ impl CdpWebView {
         session.call("Emulation.setFocusEmulationEnabled", json!({ "enabled": true }))?;
         // NOTE: format/quality are flat CDP params, not a nested object.
         session.call(
+impl WebView for CdpWebView {
+    fn id(&self) -> WebViewId {
+        self.id
+    }
+
