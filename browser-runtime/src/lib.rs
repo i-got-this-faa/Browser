@@ -474,3 +474,29 @@ mod tests {
         );
     }
 
+    #[test]
+    fn hooks_read_snapshot_and_return_requests() {
+        let mut host = host_with(
+            r#"
+            return {
+                events = {
+                    page_created = function(page)
+                        if page.url:find("dev") then
+                            return { "page", "close" }
+                        end
+                    end,
+                },
+            }
+        "#,
+        );
+        host.push_snapshot(&BrowserSnapshot { tabs: vec![], active_workspace: 1 })
+            .unwrap();
+        let payload = host
+            .lua
+            .to_value(&serde_json::json!({ "id": 1, "url": "https://dev.test" }))
+            .unwrap();
+        let reqs = host.call_hook("page_created", payload).unwrap();
+        assert_eq!(reqs, vec![Request::PageClose]);
+    }
+
+    #[test]
