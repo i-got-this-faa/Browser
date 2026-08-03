@@ -58,3 +58,8 @@ NIRI_PID=$!
 
 # Nested niri creates its own wayland socket: wait for one newer than cage's.
 NESTED_DISPLAY=""
+for i in $(seq 1 50); do
+  NESTED_DISPLAY="$(find "$XDG_RUNTIME_DIR" -maxdepth 1 -name 'wayland-*' ! -name '*.lock' -newer "$XDG_RUNTIME_DIR/$CAGE_DISPLAY" -printf '%f\n' | sort -V | tail -1)"
+  [ -n "$NESTED_DISPLAY" ] && break
+  sleep 0.2
+done
