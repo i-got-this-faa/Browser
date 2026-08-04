@@ -216,3 +216,9 @@ impl WebView for CefWebView {
     }
 }
 
+impl Drop for CefWebView {
+    fn drop(&mut self) {
+        self.destroy_once();
+    }
+}
+
