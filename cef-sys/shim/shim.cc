@@ -460,3 +460,28 @@ void* cef_view_create(uint64_t id, const char* url, int32_t w, int32_t h) {
   return v.get();
 }
 
+void cef_view_destroy(void* view) {
+  // Take ownership out of the map; the posted close lambda keeps the view
+  // (and its handlers, and therefore the CefBrowser teardown path) alive
+  // until CEF has fully closed it on the UI thread.
+  ViewRef v;
+  {
+    std::lock_guard<std::mutex> lk(g_views_mu);
+    auto it = g_views.find(reinterpret_cast<uintptr_t>(view) ? 0 : 0);
+    (void)it;
+    // The raw void* IS the view pointer Rust holds; find by pointer value.
+    for (auto& kv : g_views) {
+      if (kv.second.get() == view) {
+        v = kv.second;
+        g_views.erase(kv.first);
+        break;
+      }
+    }
+  }
+  if (!v) return;
+  CefPostTask(TID_UI, base::BindOnce(
+      [](ViewRef v) {
+        if (v->browser) v->browser->GetHost()->CloseBrowser(true);
+      }, v));
+}
+
