@@ -160,3 +160,40 @@ mod tests {
     }
 
     #[test]
+    fn workspace_switch_remembers_first_page() {
+        let mut s = BrowserState::default();
+        let vp = vp();
+        let a = s.add_page("a", &vp);
+        s.add_page("b", &vp);
+        let ws = s.strip.create_workspace("dev");
+        s.strip.active_workspace = ws; // add_page targets the current workspace
+        let dev1 = s.add_page("dev1", &vp);
+        s.focus_workspace(1, &vp);
+        assert_eq!(s.active_id(), Some(a));
+        s.focus_workspace(ws, &vp);
+        assert_eq!(s.active_id(), Some(dev1), "first page of the target workspace takes focus");
+    }
+
+    #[test]
+    fn behavior_rescale_preserves_page_count() {
+        let mut s = BrowserState::new(12.0, 0.5);
+        let vp = vp();
+        s.add_page("a", &vp);
+        s.add_page("b", &vp);
+        s.apply_behavior(20.0, 0.9);
+        assert_eq!(s.strip.pages.len(), 2);
+        assert!((s.strip.pages[0].width - 900.0).abs() < 1.0);
+        assert_eq!(s.strip.gap, 20.0);
+    }
+
+    #[test]
+    fn next_workspace_wraps() {
+        let mut s = BrowserState::default();
+        s.strip.create_workspace("w2");
+        s.strip.create_workspace("w3");
+        assert_eq!(s.next_workspace(true), Some(2));
+        s.strip.active_workspace = 3;
+        assert_eq!(s.next_workspace(true), Some(1), "wraps to first");
+        assert_eq!(s.next_workspace(false), Some(2));
+    }
+}
