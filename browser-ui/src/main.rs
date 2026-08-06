@@ -772,3 +772,38 @@ impl Render for Shell {
         let vs = window.viewport_size();
         let new_vp = Viewport {
             width: vs.width.into(),
+
+        // Webview viewports must track their on-screen frame size so CDP
+        // screenshots match what is displayed. Checked per render, but each
+        // view is only resized when its rounded frame size actually changes
+        // (per-frame resize churned the engine's compositor: see perf audit).
+        // In overview the frames are shrunken; resize webviews to match.
+        let mut resize_count = 0usize;
+        for (id, g) in &geos {
+            let size = (g.width.round() as u32, g.height.round() as u32);
+            if size.0 == 0 || size.1 == 0 {
+                continue;
+            }
+            if self.view_sizes.get(id) == Some(&size) {
+                continue;
+            }
+            // Pages without a webview yet (spawned empty, never navigated)
+            // would fail the resize and retry every render.
+            if !self.engine.has_view(*id) {
+                continue;
+            }
+            if self.engine.resize(*id, size.0, size.1).is_ok() {
+                self.view_sizes.insert(*id, size);
+            }
+            resize_count += 1;
+        }
+        if resize_count > 0 {
+            perf_event!("render.resize_calls", "pages" => resize_count);
+        }
+
+        let bg = hex(&self.config.theme.bg);
+        let bar_bg = hex(&self.config.theme.bar);
+        let bar_text = hex(&self.config.theme.bar_text);
+        let border = hex(&self.config.theme.border);
+        let border_focus = hex(&self.config.theme.border_focus);
+        let accent = hex(&self.config.theme.accent);
