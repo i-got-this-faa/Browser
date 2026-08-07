@@ -505,3 +505,54 @@ impl WebView for CdpWebView {
         self.id
     }
 
+    fn send(&self, cmd: WebViewCommand) -> Result<()> {
+        match cmd {
+            WebViewCommand::Navigate(url) => {
+                self.session.call("Page.navigate", json!({ "url": url }))?;
+                Ok(())
+            }
+            WebViewCommand::Reload => {
+                self.session.notify("Page.reload", json!({ "ignoreCache": false }))
+            }
+            WebViewCommand::HardReload => {
+                self.session.notify("Page.reload", json!({ "ignoreCache": true }))
+            }
+            WebViewCommand::GoBack | WebViewCommand::GoForward => {
+                let history = self.session.call("Page.getNavigationHistory", json!({}))?;
+                let current = history["currentIndex"].as_i64().unwrap_or(0);
+                let entries = history["entries"].as_array().cloned().unwrap_or_default();
+                let target_idx = match cmd {
+                    WebViewCommand::GoBack => current - 1,
+                    _ => current + 1,
+                };
+                match entries.get(target_idx.max(0) as usize) {
+                    Some(entry) if target_idx >= 0 => {
+                        let entry_id = entry["id"].as_i64().unwrap_or(0);
+                        self.session
+                            .call("Page.navigateToHistoryEntry", json!({ "entryId": entry_id }))?;
+                        Ok(())
+                    }
+                    _ => Ok(()), // at the edge of history: no-op
+                }
+            }
+            WebViewCommand::Resize { width, height } => {
+                self.session.call(
+                    "Emulation.setDeviceMetricsOverride",
+                    json!({
+                        "width": width, "height": height,
+                        "deviceScaleFactor": 1, "mobile": false
+                    }),
+                )?;
+                // Nudge a fresh frame at the new size.
+                self.session.notify("Page.captureScreenshot", json!({ "format": "png" }))?;
+                Ok(())
+            }
+            WebViewCommand::Mouse { x, y, kind, button, mods } => {
+                let type_ = match kind {
+                    MouseKind::Down => "mousePressed",
+                    MouseKind::Up => "mouseReleased",
+                    MouseKind::Move => "mouseMoved",
+                };
+                let button = match button {
+                    MouseButton::Left => "left",
+                    MouseButton::Middle => "middle",
