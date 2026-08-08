@@ -73,3 +73,21 @@ commands = {
 `run` may return requests or emit them via `browser.request`. Run from
 the palette (`ctrl+p`) or the prompt (`:my.hackernews`).
 
+## events
+
+Hooks receive a payload table and may return requests:
+
+```lua
+events = {
+  page_created = function(page)        -- page = { id, url }
+    if page.url:find("^https://x%.com") then
+      return { cmd = "page.to_workspace", arg = 3 }
+    end
+  end,
+}
+```
+
+Available hooks: `page_created`, `page_closed`, `page_focused`,
+`page_navigated`, `page_title_changed`, `workspace_changed`,
+`config_reloaded`.
+
