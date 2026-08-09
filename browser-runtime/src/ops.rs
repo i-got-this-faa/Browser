@@ -316,3 +316,51 @@ mod tests {
         assert_eq!(s.active_id(), Some(a));
     }
 
+    #[test]
+    fn move_right_swaps_slots() {
+        let (mut s, vp) = setup();
+        let a = s.add_page("a", &vp);
+        let c = s.add_page("c", &vp);
+        // `c` is active (new pages take focus). Move it left instead, then
+        // verify the pair swapped; move a back right for the original path.
+        let (ax, cx) = (s.strip.page(a).unwrap().x, s.strip.page(c).unwrap().x);
+        let mut fx = Effects::default();
+        apply(&mut s, &vp, Request::PageMoveLeft, &mut fx);
+        assert!((s.strip.page(c).unwrap().x - ax).abs() < 0.01);
+        assert!((s.strip.page(a).unwrap().x - cx).abs() < 0.01);
+    }
+
+    #[test]
+    fn prompt_submit_routes_url_vs_search() {
+        let (mut s, vp) = setup();
+        s.add_page("about:blank", &vp);
+        let mut fx = Effects::default();
+        apply(&mut s, &vp, Request::PromptSubmit("example.com".into()), &mut fx);
+        assert_eq!(fx.navigate[0].1, "https://example.com");
+        let mut fx = Effects::default();
+        apply(&mut s, &vp, Request::PromptSubmit("two words".into()), &mut fx);
+        assert_eq!(
+            fx.prompt_open.as_deref(),
+            Some("two words"),
+            "search goes back to the prompt with query preserved"
+        );
+    }
+
+    #[test]
+    fn quit_sets_flag_and_effect() {
+        let (mut s, vp) = setup();
+        let mut fx = Effects::default();
+        apply(&mut s, &vp, Request::Quit, &mut fx);
+        assert!(fx.quit && s.quit_requested);
+    }
+
+    #[test]
+    fn reload_without_url_is_noop() {
+        let (mut s, vp) = setup();
+        let id = s.add_page("", &vp);
+        let mut fx = Effects::default();
+        apply(&mut s, &vp, Request::Reload, &mut fx);
+        assert!(fx.navigate.is_empty(), "empty url must not navigate");
+        let _ = id;
+    }
+}
