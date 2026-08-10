@@ -23,3 +23,16 @@ cleanup() {
 trap cleanup EXIT
 
 # Wait for the control socket (CEF spawn can take a few seconds).
+for i in $(seq 1 150); do
+  [ -S "$SOCK" ] && break
+  if ! kill -0 "$BROWSER_PID" 2>/dev/null; then
+    echo "browser died during startup:"; tail -20 "$LOG"; exit 1
+  fi
+  sleep 0.2
+done
+[ -S "$SOCK" ] || { echo "no control socket; log:"; tail -20 "$LOG"; exit 1; }
+
+ctl() { printf '%s\n' "$1" | timeout 10 nc -U "$SOCK"; }
+
+# Let it settle, then drive the requested scenario.
+sleep 3
