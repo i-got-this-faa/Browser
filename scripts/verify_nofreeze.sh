@@ -14,3 +14,11 @@ for i in $(seq 1 100); do [ -S "$SOCK" ] && break; sleep 0.2; done
 [ -S "$SOCK" ] || { echo "FAIL: no socket"; exit 1; }
 sleep 3
 
+# Silent client: holds the connection open without sending a line.
+python3 - "$SOCK" <<'PYEOF' &
+import socket, sys, time
+s = socket.socket(socket.AF_UNIX)
+s.connect(sys.argv[1])
+time.sleep(8)   # hold it open silently while the browser must keep serving
+s.close()
+PYEOF
