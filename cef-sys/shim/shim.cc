@@ -485,3 +485,14 @@ void cef_view_destroy(void* view) {
       }, v));
 }
 
+const uint8_t* cef_view_lock_frame(void* view, int32_t* w, int32_t* h) {
+  View* v = static_cast<View*>(view);
+  if (!v) return nullptr;
+  v->frame.mu.lock();
+  *w = v->frame.w;
+  *h = v->frame.h;
+  return v->frame.px.data();
+}
+void cef_view_unlock_frame(void* view) {
+  static_cast<View*>(view)->frame.mu.unlock();
+}
