@@ -807,3 +807,21 @@ impl Render for Shell {
         let border = hex(&self.config.theme.border);
         let border_focus = hex(&self.config.theme.border_focus);
         let accent = hex(&self.config.theme.accent);
+
+        let mut pages = div().absolute().size_full();
+        for (id, g) in geos {
+            let Some(slot) = self.state.slot(id) else { continue };
+            let is_active = self.state.strip.active_page == Some(id);
+            let title: SharedString = if slot.page.title.is_empty() {
+                if slot.page.url.is_empty() {
+                    "new page".into()
+                } else {
+                    truncate(&slot.page.url, 40).into()
+                }
+            } else {
+                truncate(&slot.page.title, 40).into()
+            };
+
+            let mut frame = div()
+                .absolute()
+                .left(px(g.rel_x))
