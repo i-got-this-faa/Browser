@@ -500,3 +500,54 @@ mod tests {
     }
 
     #[test]
+    fn snapshot_is_readable_from_commands() {
+        let mut host = host_with(
+            r#"
+            return {
+                commands = {
+                    ["my.count"] = { desc = "c", run = function()
+                        return { cmd = "lua.exec", arg = "count=" .. #browser.tabs }
+                    end },
+                },
+            }
+        "#,
+        );
+        host.push_snapshot(&BrowserSnapshot {
+            tabs: vec![TabInfo {
+                id: 1,
+                url: "u".into(),
+                title: "t".into(),
+                workspace: 1,
+                active: true,
+            }],
+            active_workspace: 1,
+        })
+        .unwrap();
+        let reqs = host.call_command("my.count", None).unwrap();
+        assert_eq!(
+            reqs,
+            vec![Request::ExecLua("count=1".into())],
+            "script read #browser.tabs from the snapshot"
+        );
+    }
+
+    #[test]
+    fn unknown_command_errors_cleanly() {
+        let mut host = host_with("return {}");
+        assert!(host.call_command("nope", None).is_err());
+    }
+
+    #[test]
+    fn exec_evaluates_chunks() {
+        let mut host = host_with("return {}");
+        let reqs = host.exec(r#"browser.request { cmd = "overview.toggle" }"#).unwrap();
+        assert_eq!(reqs, vec![Request::OverviewToggle]);
+    }
+
+    #[test]
+    fn broken_config_reports_error() {
+        let mut host = LuaHost::new();
+        let mut out = Vec::new();
+        assert!(host.load_config("return {", &mut out).is_err());
+    }
+}
