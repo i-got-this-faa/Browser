@@ -556,3 +556,55 @@ impl WebView for CdpWebView {
                 let button = match button {
                     MouseButton::Left => "left",
                     MouseButton::Middle => "middle",
+                    MouseButton::Right => "right",
+                };
+                let pressed = matches!(kind, MouseKind::Down | MouseKind::Up);
+                self.session.notify(
+                    "Input.dispatchMouseEvent",
+                    json!({
+                        "type": type_, "x": x, "y": y,
+                        "button": if kind == MouseKind::Move { "none" } else { button },
+                        "buttons": if kind == MouseKind::Down { 1 } else { 0 },
+                        "modifiers": mods.cdp_modifiers(),
+                        "clickCount": if pressed { 1 } else { 0 },
+                    }),
+                )
+            }
+            WebViewCommand::Scroll { x, y, dx, dy } => self.session.notify(
+                "Input.dispatchMouseEvent",
+                json!({ "type": "mouseWheel", "x": x, "y": y, "deltaX": dx, "deltaY": dy }),
+            ),
+            WebViewCommand::Keys(keys) => {
+                for k in keys {
+                    let modifiers = k.mods.cdp_modifiers();
+                    let mut params = json!({
+                        "type": "keyDown", "key": k.key,
+                        "windowsVirtualKeyCode": k.vk, "nativeVirtualKeyCode": k.vk,
+                        "modifiers": modifiers,
+                    });
+                    if let Some(text) = &k.text {
+                        params["text"] = json!(text);
+                        params["unmodifiedText"] = json!(text.to_lowercase());
+                    }
+                    self.session.notify("Input.dispatchKeyEvent", params)?;
+                    self.session.notify(
+                        "Input.dispatchKeyEvent",
+                        json!({
+                            "type": "keyUp", "key": k.key,
+                            "windowsVirtualKeyCode": k.vk, "nativeVirtualKeyCode": k.vk,
+                            "modifiers": modifiers,
+                        }),
+                    )?;
+                }
+                Ok(())
+            }
+            WebViewCommand::SetFocus(focused) => self.session.call(
+                "Emulation.setFocusEmulationEnabled",
+                json!({ "enabled": focused }),
+            ).map(|_| ()),
+            // Frozen harness: background compositing suppression is a CEF
+            // concern; screencast only produces frames when composited anyway.
+            WebViewCommand::SetHidden(_) => Ok(()),
+        }
+    }
+
