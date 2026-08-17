@@ -222,3 +222,19 @@ impl Drop for CefWebView {
     }
 }
 
+fn dispatch_key(view: *mut c_void, k: &KeyInput) {
+    let mods = cef_mods(&k.mods);
+    let vk = k.vk as i32;
+    if let Some(text) = &k.text {
+        for c in text.encode_utf16() {
+            // KEYEVENT_CHAR delivers the character; Chromium synthesizes text.
+            unsafe { ffi::cef_view_key(view, 3, vk, vk, mods, c) };
+        }
+    }
+    // RAWKEYDOWN + KEYUP bracket the press for shortcuts and JS handlers.
+    unsafe {
+        ffi::cef_view_key(view, 0, vk, vk, mods, 0);
+        ffi::cef_view_key(view, 2, vk, vk, mods, 0);
+    }
+}
+
