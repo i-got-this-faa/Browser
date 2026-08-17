@@ -496,3 +496,18 @@ const uint8_t* cef_view_lock_frame(void* view, int32_t* w, int32_t* h) {
 void cef_view_unlock_frame(void* view) {
   static_cast<View*>(view)->frame.mu.unlock();
 }
+const uint8_t* cef_view_lock_popup(void* view, int32_t* w, int32_t* h) {
+  View* v = static_cast<View*>(view);
+  if (!v) return nullptr;
+  v->popup.mu.lock();
+  *w = v->popup.w;
+  *h = v->popup.h;
+  return v->popup.px.data();
+}
+void cef_view_unlock_popup(void* view) {
+  static_cast<View*>(view)->popup.mu.unlock();
+}
+int32_t cef_view_popup_visible(void* view) {
+  View* v = static_cast<View*>(view);
+  return v && v->popup.h > 0 ? 1 : 0;
+}
