@@ -128,3 +128,37 @@ impl EngineController {
         }
     }
 
+    /// Create a webview for a page and remember it.
+    pub fn spawn_page(&self, page_id: u64, url: &str) -> Result<()> {
+        let view = match self.backend() {
+            Backend::Cef => PageView::Cef(webview_cef::CefWebView::create(url, 800, 600)?),
+            Backend::Cdp => {
+                let engine = self
+                    .cdp_engine
+                    .as_ref()
+                    .ok_or_else(|| anyhow!("cdp engine not running"))?;
+                PageView::Cdp(Box::new(engine.new_webview(url)?))
+            }
+        };
+        self.shared.lock().unwrap().views.insert(page_id, view);
+        Ok(())
+    }
+
+    /// True when a page has a live webview behind it.
+    pub fn has_view(&self, page_id: u64) -> bool {
+        self.shared.lock().unwrap().views.contains_key(&page_id)
+    }
+
+    fn send(&self, page_id: u64, cmd: WebViewCommand) -> Result<()> {
+        let shared = self.shared.lock().unwrap();
+        let view = shared
+            .views
+            .get(&page_id)
+            .ok_or_else(|| anyhow!("no view for page {page_id}"))?;
+        view.as_webview().send(cmd)
+    }
+
+    pub fn navigate(&self, page_id: u64, url: &str) -> Result<()> {
+        self.send(page_id, WebViewCommand::Navigate(url.to_string()))
+    }
+
