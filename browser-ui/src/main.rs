@@ -825,3 +825,51 @@ impl Render for Shell {
             let mut frame = div()
                 .absolute()
                 .left(px(g.rel_x))
+
+            // Engine frames live in `surfaces` (written by the event pump);
+            // publish any newer buffer once per rendered frame here. Hidden
+            // pages (other workspaces) never enter this loop, so their
+            // buffers are never uploaded while invisible.
+            let tex = {
+                let surface = self.surfaces.get_mut(&id);
+                surface.and_then(|s| s.texture(cx))
+            };
+            if let Some(image) = tex {
+                frame = frame.child(
+                    img(ImageSource::Render(image)).object_fit(ObjectFit::Fill).size_full(),
+                );
+            } else if let Some(png) = &slot.frame_png {
+                if let Some(bgra) = decode_png_bgra(png) {
+                    let image = Arc::new(RenderImage::new(
+                        smallvec::smallvec![image::Frame::new(bgra)],
+                    ));
+                    frame = frame.child(
+                        img(ImageSource::Render(image)).object_fit(ObjectFit::Fill).size_full(),
+                    );
+                }
+            } else if slot.loading {
+                frame = frame.child(
+                    div()
+                        .size_full()
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .text_color(bar_text)
+                        .child(format!("loading {title}")),
+                );
+            }
+
+            // No floating title chip here: it hovered over page content and
+            // duplicated what the tab bar already shows (titles are slop).
+
+            pages = pages.child(frame);
+        }
+
+        let mut root = div()
+            .id("root")
+            .size_full()
+            .bg(bg)
+            .track_focus(&self.focus)
+            .key_context("Browser")
+            .on_key_down(cx.listener(Self::on_key))
+            .child(pages);
