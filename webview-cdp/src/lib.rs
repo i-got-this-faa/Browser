@@ -608,3 +608,13 @@ impl WebView for CdpWebView {
         }
     }
 
+    fn events(&self) -> &Receiver<WebViewEvent> {
+        &self.events
+    }
+
+    fn close(self: Box<Self>) -> Result<()> {
+        let _ = self.session.call("Page.close", json!({}));
+        Ok(())
+    }
+}
+
