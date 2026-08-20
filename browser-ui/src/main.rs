@@ -873,3 +873,15 @@ impl Render for Shell {
             .key_context("Browser")
             .on_key_down(cx.listener(Self::on_key))
             .child(pages);
+
+        if self.config.behavior.show_page_bar {
+            root = root.child(self.render_page_bar(bar_bg, bar_text, accent, border, cx));
+        }
+        if self.config.behavior.show_status_bar {
+            root = root.child(self.render_status_bar(bar_bg, bar_text, accent));
+        }
+
+        match &self.overlay {
+            Overlay::Prompt { text, .. } => {
+                root = root.child(self.render_prompt(text.clone(), bar_bg, bar_text, accent));
+            }
