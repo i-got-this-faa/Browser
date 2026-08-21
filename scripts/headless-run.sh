@@ -63,3 +63,21 @@ for i in $(seq 1 50); do
   [ -n "$NESTED_DISPLAY" ] && break
   sleep 0.2
 done
+if [ -z "$NESTED_DISPLAY" ]; then
+  echo "nested niri never created a socket; log:"
+  cat "$RUN_DIR/niri.log" || true
+  exit 1
+fi
+echo "== niri socket: $NESTED_DISPLAY =="
+
+echo "== launching browser inside nested niri =="
+(
+  export WAYLAND_DISPLAY="$NESTED_DISPLAY"
+  export STRIP_BROWSER_SOCK
+  exec env -u LD_LIBRARY_PATH \
+    RUST_LOG=info \
+    "$BROWSER_BIN"
+) >"$RUN_DIR/browser.log" 2>&1 &
+BROWSER_PID=$!
+
+# Wait for the control socket.
