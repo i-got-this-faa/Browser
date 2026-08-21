@@ -511,3 +511,16 @@ int32_t cef_view_popup_visible(void* view) {
   View* v = static_cast<View*>(view);
   return v && v->popup.h > 0 ? 1 : 0;
 }
+void cef_view_popup_rect(void* view, int32_t out[4]) {
+  View* v = static_cast<View*>(view);
+  if (!v) return;
+  std::lock_guard<std::mutex> lk(v->popup_geom_mu);
+  out[0] = v->popup_geom.x;
+  out[1] = v->popup_geom.y;
+  out[2] = v->popup_geom.width;
+  out[3] = v->popup_geom.height;
+}
+
+// All commands below re-resolve the view by id on the UI thread, so they are
+// safe during async browser creation and after destroy (view simply gone).
+
