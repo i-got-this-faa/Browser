@@ -618,3 +618,13 @@ impl WebView for CdpWebView {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Store
+// ---------------------------------------------------------------------------
+
+/// All live web surfaces keyed by shell id. The shell routes geometry/input
+/// through this store and polls events per frame.
+pub struct WebViewStore {
+    views: HashMap<WebViewId, Box<dyn WebView>>,
+}
+
