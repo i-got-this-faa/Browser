@@ -69,3 +69,10 @@ uBlock integration). `webview-cdp` already isolates this behind the
 3. Mouse: page hit-test from strip geometry → page-local coordinates →
    `Input.dispatchMouseEvent`; wheel → `mouseWheel`.
 
+## Hot reload
+
+`notify` watches the config directory; the pump debounces by draining all
+pending events each frame, re-reads the file, re-parses, re-binds Lua, and
+fires `config_reloaded`. A broken file shows a toast and keeps the old
+config.
+
