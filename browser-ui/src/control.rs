@@ -65,3 +65,24 @@ pub fn poll(shell: &mut Shell, listener: &UnixListener, cx: &mut gpui::Context<S
 
 
 
+fn serve(
+    stream: UnixStream,
+    shell: &mut Shell,
+    cx: &mut gpui::Context<Shell>,
+) -> std::io::Result<()> {
+    // Read timeout: a client that connects without sending must not block
+    // the UI thread (the frame pump answers this socket synchronously).
+    stream.set_read_timeout(Some(std::time::Duration::from_millis(500)))?;
+    let mut reader = BufReader::new(stream.try_clone()?);
+    let mut line = String::new();
+    if reader.read_line(&mut line)? == 0 {
+        return Ok(());
+    }
+    let reply = exec_line(shell, line.trim(), cx);
+    let mut stream = stream;
+    stream.write_all(reply.as_bytes())?;
+    stream.write_all(b"\n")?;
+    Ok(())
+}
+
+/// Handle one request. Public so tests can drive a Shell without a socket.
