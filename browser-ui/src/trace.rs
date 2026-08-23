@@ -84,3 +84,33 @@ where
         self.file.is_some() && meta.target() == "perf"
     }
 
+    fn on_event(&self, event: &Event<'_>, _ctx: Context<'_, S>) {
+        let Some(file) = self.file.as_ref() else { return };
+        struct V {
+            out: String,
+            first: bool,
+            name: Option<String>,
+        }
+        impl tracing::field::Visit for V {
+            fn record_str(&mut self, field: &tracing::field::Field, value: &str) {
+                use std::fmt::Write;
+                if field.name() == "name" {
+                    self.name = Some(value.to_string());
+                    return;
+                }
+                if !self.first {
+                    self.out.push(',');
+                }
+                self.first = false;
+                // Numeric fields are emitted raw (perf_event! passes numbers
+                // through Display via %); strings get JSON-quoted.
+                if value.bytes().all(|b| b.is_ascii_digit() || b == b'.' || b == b'-')
+                    && value.contains(|c: char| c.is_ascii_digit())
+                {
+                    let _ = write!(self.out, "\"{}\":{}", field.name(), value);
+                } else {
+                    let _ = write!(self.out, "\"{}\":\"{}\"", field.name(), value);
+                }
+            }
+            fn record_debug(&mut self, field: &tracing::field::Field, value: &dyn std::fmt::Debug) {
+                use std::fmt::Write;
