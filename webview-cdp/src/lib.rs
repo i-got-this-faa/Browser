@@ -628,3 +628,9 @@ pub struct WebViewStore {
     views: HashMap<WebViewId, Box<dyn WebView>>,
 }
 
+impl Default for WebViewStore {
+    fn default() -> Self {
+        Self { views: HashMap::new() }
+    }
+}
+
