@@ -885,3 +885,7 @@ impl Render for Shell {
             Overlay::Prompt { text, .. } => {
                 root = root.child(self.render_prompt(text.clone(), bar_bg, bar_text, accent));
             }
+// ---------------------------------------------------------------------------
+// Sub-renderers
+// ---------------------------------------------------------------------------
+
