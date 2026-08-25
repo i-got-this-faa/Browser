@@ -91,3 +91,14 @@ Available hooks: `page_created`, `page_closed`, `page_focused`,
 `page_navigated`, `page_title_changed`, `workspace_changed`,
 `config_reloaded`.
 
+## Reading live state
+
+Before each command/hook call the shell sets:
+
+- `browser.tabs` — list of `{ id, url, title, workspace, active }`
+- `browser.active_page` — id or nil
+- `browser.active_workspace` — id
+
+Also available: `browser.request { ... }` (emit a request) and
+`browser.log("...")` (stderr log).
+
