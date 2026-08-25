@@ -238,3 +238,20 @@ fn dispatch_key(view: *mut c_void, k: &KeyInput) {
     }
 }
 
+fn cef_mods(m: &InputMods) -> u32 {
+    let mut f = 0u32;
+    if m.shift {
+        f |= 2; // EVENTFLAG_SHIFT_DOWN
+    }
+    if m.ctrl {
+        f |= 4; // EVENTFLAG_CONTROL_DOWN
+    }
+    if m.alt {
+        f |= 8; // EVENTFLAG_ALT_DOWN
+    }
+    if m.meta {
+        f |= 128; // EVENTFLAG_COMMAND_DOWN
+    }
+    f
+}
+
