@@ -634,3 +634,37 @@ impl Default for WebViewStore {
     }
 }
 
+impl WebViewStore {
+    pub fn add(&mut self, view: Box<dyn WebView>) -> WebViewId {
+        let id = view.id();
+        self.views.insert(id, view);
+        id
+    }
+
+    #[allow(dead_code)]
+    pub fn get(&self, id: WebViewId) -> Option<&dyn WebView> {
+        self.views.get(&id).map(|v| v.as_ref())
+    }
+
+    pub fn send(&self, id: WebViewId, cmd: WebViewCommand) -> Result<()> {
+        self.views
+            .get(&id)
+            .ok_or_else(|| anyhow!("unknown webview {id}"))?
+            .send(cmd)
+    }
+
+    pub fn drain_events(&mut self) -> Vec<(WebViewId, WebViewEvent)> {
+        let mut out = Vec::new();
+        for (id, view) in self.views.iter_mut() {
+            for ev in view.events().try_iter() {
+                out.push((*id, ev));
+            }
+        }
+        out
+    }
+
+    pub fn remove(&mut self, id: WebViewId) -> Option<Box<dyn WebView>> {
+        self.views.remove(&id)
+    }
+}
+
