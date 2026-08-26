@@ -43,3 +43,23 @@ fn bench(name: &str, pages: usize, iters: u32) {
     );
 }
 
+fn bench_snapshot(pages: usize, iters: u32) {
+    let strip = strip_with(pages);
+    let start = std::time::Instant::now();
+    let mut sink = 0usize;
+    for _ in 0..iters {
+        // What Shell::snapshot builds for every Lua hook/command call.
+        let tabs: Vec<(u64, String, String)> = strip
+            .visible()
+            .iter()
+            .map(|p| (p.id, p.url.clone(), p.title.clone()))
+            .collect();
+        sink += tabs.len();
+    }
+    let total = start.elapsed();
+    println!(
+        "snapshot_build {pages:>20} pages  {iters:>7} iters  {:>10.1} ns/iter  (sink {sink})",
+        total.as_nanos() as f64 / iters as f64
+    );
+}
+
