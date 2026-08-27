@@ -889,3 +889,29 @@ impl Render for Shell {
 // Sub-renderers
 // ---------------------------------------------------------------------------
 
+impl Shell {
+    fn render_page_bar(
+        &self,
+        bar_bg: gpui::Hsla,
+        bar_text: gpui::Hsla,
+        accent: gpui::Hsla,
+        border: gpui::Hsla,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
+        let mut bar = div()
+            .absolute()
+            .top(px(0.0))
+            .left(px(0.0))
+            .right(px(0.0))
+            .h(px(PAGE_BAR_H))
+            .flex()
+            .flex_row()
+            .items_center()
+            .gap_1()
+            .px_2()
+            .bg(bar_bg)
+            .border_b_1()
+            .border_color(border)
+            // Full-height page frames lie *under* this bar (top = 0); without
+            // this, a tab click also fires the frame's handler underneath and
+            // the bubble phase wins, reverting the focus.
