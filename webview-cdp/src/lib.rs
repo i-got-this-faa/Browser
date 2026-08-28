@@ -668,3 +668,11 @@ impl WebViewStore {
     }
 }
 
+// ---------------------------------------------------------------------------
+// fake CDP server used by tests (no chrome binary required)
+// ---------------------------------------------------------------------------
+
+pub mod testing {
+    use super::*;
+
+    /// Minimal fake CDP page target: serves /json/list and /json/new,
