@@ -538,3 +538,16 @@ void cef_view_navigate(void* view, const char* url) {
       }, id, std::string(url)));
 }
 
+void cef_view_back(void* view) {
+  View* v = static_cast<View*>(view);
+  if (!v) return;
+  uint64_t id = v->id;
+  CefPostTask(TID_UI, base::BindOnce([](uint64_t vid) {
+    ViewRef v;
+    { std::lock_guard<std::mutex> lk(g_views_mu);
+      auto it = g_views.find(vid);
+      if (it != g_views.end()) v = it->second; }
+    if (v && v->browser) v->browser->GoBack();
+  }, id));
+}
+
