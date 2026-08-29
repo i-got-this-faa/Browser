@@ -551,3 +551,16 @@ void cef_view_back(void* view) {
   }, id));
 }
 
+void cef_view_forward(void* view) {
+  View* v = static_cast<View*>(view);
+  if (!v) return;
+  uint64_t id = v->id;
+  CefPostTask(TID_UI, base::BindOnce([](uint64_t vid) {
+    ViewRef v;
+    { std::lock_guard<std::mutex> lk(g_views_mu);
+      auto it = g_views.find(vid);
+      if (it != g_views.end()) v = it->second; }
+    if (v && v->browser) v->browser->GoForward();
+  }, id));
+}
+
