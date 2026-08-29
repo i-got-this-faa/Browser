@@ -915,3 +915,20 @@ impl Shell {
             // Full-height page frames lie *under* this bar (top = 0); without
             // this, a tab click also fires the frame's handler underneath and
             // the bubble phase wins, reverting the focus.
+            } else {
+                truncate(&p.title, 24).into()
+            };
+            // Tabs are interactive: left-click switches to the page,
+            // middle-click closes it (browser convention).
+            let tab = p.id;
+            bar = bar.child(
+                div()
+                    .px_2()
+                    .py_0p5()
+                    .rounded_sm()
+                    .text_size(px(11.0))
+                    .text_color(if is_active { accent } else { bar_text })
+                    .child(label)
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(move |this, _ev, _win, cx| {
