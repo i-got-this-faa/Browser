@@ -255,3 +255,46 @@ fn cef_mods(m: &InputMods) -> u32 {
     f
 }
 
+// ---------------------------------------------------------------------------
+// Global sink: shim events -> per-view queues
+// ---------------------------------------------------------------------------
+
+extern "C" fn sink(ev: *const ffi::CefEvent, _ud: *mut c_void) {
+    // SAFETY: the shim guarantees `ev` is valid for the duration of the call.
+    let ev = unsafe { &*ev };
+    let entry = registry().lock().unwrap().get(&ev.view_id).map(|s| Sink {
+        tx: s.tx.clone(),
+        damage: Arc::clone(&s.damage),
+    });
+    let Some(entry) = entry else { return };
+    match ev.kind {
+        ffi::CEF_EV_FRAME | ffi::CEF_EV_POPUP_FRAME => {
+            let n = ev.nrects.clamp(0, 16) as usize;
+            let rects: Vec<[i32; 4]> = ev.rects[..n].to_vec();
+            // Latest damage wins: the shim buffer holds the union already,
+            // and the shell repaints from it wholesale on the next paint.
+            *entry.damage.lock().unwrap() = Some(rects);
+            // Payload-free nudge: the shell reads pixels via with_frame();
+            // nothing encoded ever crosses this boundary.
+            if let Some(tx) = entry.tx.as_ref() {
+                let _ = tx.send(WebViewEvent::Frame {
+                    data: Vec::new(),
+                    width: ev.w as u32,
+                    height: ev.h as u32,
+                });
+            }
+        }
+        ffi::CEF_EV_TITLE => {
+            if let Some(tx) = entry.tx.as_ref() {
+                let _ = tx.send(WebViewEvent::TitleChanged(cstr(ev.str_)));
+            }
+        }
+        ffi::CEF_EV_URL => {
+            if let Some(tx) = entry.tx.as_ref() {
+                let _ = tx.send(WebViewEvent::UrlChanged(cstr(ev.str_)));
+            }
+        }
+        _ => {}
+    }
+}
+
