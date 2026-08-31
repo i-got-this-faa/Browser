@@ -676,3 +676,44 @@ pub mod testing {
     use super::*;
 
     /// Minimal fake CDP page target: serves /json/list and /json/new,
+    /// accepts websocket handshakes, and answers calls with empty results.
+    pub struct FakeCdpServer {
+        pub port: u16,
+        shutdown: Arc<Mutex<bool>>,
+        thread: Option<std::thread::JoinHandle<()>>,
+    }
+
+    impl FakeCdpServer {
+        pub fn start() -> Self {
+            let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+            let port = listener.local_addr().unwrap().port();
+            let shutdown = Arc::new(Mutex::new(false));
+            let shutdown2 = shutdown.clone();
+            let thread = std::thread::spawn(move || {
+                for stream in listener.incoming() {
+                    if *shutdown2.lock().unwrap() {
+                        break;
+                    }
+                    let Ok(stream) = stream else { continue };
+                    let Ok(mut writer) = stream.try_clone() else { continue };
+                    let mut reader = BufReader::new(stream);
+                    let mut request_line = String::new();
+                    if reader.read_line(&mut request_line).is_err() {
+                        continue;
+                    }
+                    let path = request_line.split_whitespace().nth(1).unwrap_or("/").to_string();
+                    loop {
+                        let mut line = String::new();
+                        let n = reader.read_line(&mut line).unwrap_or(0);
+                        if n == 0 || line.trim().is_empty() {
+                            break;
+                        }
+                    }
+
+                    let json_response = |body: &str| {
+                        format!(
+                            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                            body.len(),
+                            body
+                        )
+                    };
