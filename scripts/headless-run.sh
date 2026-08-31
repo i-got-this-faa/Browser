@@ -81,3 +81,7 @@ echo "== launching browser inside nested niri =="
 BROWSER_PID=$!
 
 # Wait for the control socket.
+for i in $(seq 1 100); do
+  [ -S "$STRIP_BROWSER_SOCK" ] && break
+  sleep 0.2
+done
