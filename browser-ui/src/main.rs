@@ -932,3 +932,44 @@ impl Shell {
                     .on_mouse_down(
                         MouseButton::Left,
                         cx.listener(move |this, _ev, _win, cx| {
+    fn render_status_bar(
+        &self,
+        bar_bg: gpui::Hsla,
+        bar_text: gpui::Hsla,
+        accent: gpui::Hsla,
+    ) -> impl IntoElement {
+        let ws = self
+            .state
+            .strip
+            .workspaces
+            .iter()
+            .map(|w| {
+                if w.id == self.state.strip.active_workspace {
+                    format!("[{}]", w.name)
+                } else {
+                    format!(" {}", w.name)
+                }
+            })
+            .collect::<Vec<_>>()
+            .join(" ");
+        let active_url: SharedString = self
+            .state
+            .active_id()
+            .and_then(|id| self.state.strip.page(id))
+            .map(|p| truncate(&p.url, 80))
+            .unwrap_or_default()
+            .into();
+        div()
+            .absolute()
+            .bottom(px(0.0))
+            .left(px(0.0))
+            .right(px(0.0))
+            .h(px(STATUS_BAR_H))
+            .flex()
+            .flex_row()
+            .items_center()
+            .gap_3()
+            .px_2()
+            .bg(bar_bg)
+            .text_size(px(11.0))
+            .text_color(bar_text)
