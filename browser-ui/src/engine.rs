@@ -162,3 +162,60 @@ impl EngineController {
         self.send(page_id, WebViewCommand::Navigate(url.to_string()))
     }
 
+    pub fn reload(&self, page_id: u64, bypass_cache: bool) -> Result<()> {
+        self.send(
+            page_id,
+            if bypass_cache {
+                WebViewCommand::HardReload
+            } else {
+                WebViewCommand::Reload
+            },
+        )
+    }
+
+    pub fn go_back(&self, page_id: u64) -> Result<()> {
+        self.send(page_id, WebViewCommand::GoBack)
+    }
+
+    pub fn go_forward(&self, page_id: u64) -> Result<()> {
+        self.send(page_id, WebViewCommand::GoForward)
+    }
+
+    pub fn resize(&self, page_id: u64, width: u32, height: u32) -> Result<()> {
+        self.send(page_id, WebViewCommand::Resize { width, height })
+    }
+
+    /// Background pages must not composite (DoD): WasHidden(true) stops CEF
+    /// from producing frames for off-screen pages.
+    pub fn set_hidden(&self, page_id: u64, hidden: bool) {
+        let _ = self.send(page_id, WebViewCommand::SetHidden(hidden));
+    }
+
+    pub fn set_focus(&self, page_id: u64, focused: bool) {
+        let _ = self.send(page_id, WebViewCommand::SetFocus(focused));
+    }
+
+    pub fn close_page(&self, page_id: u64) {
+        let mut shared = self.shared.lock().unwrap();
+        if let Some(view) = shared.views.remove(&page_id) {
+            let _ = view.close();
+        }
+    }
+
+    /// Forward a mouse event at page-local coordinates.
+    pub fn mouse(
+        &self,
+        page_id: u64,
+        x: i32,
+        y: i32,
+        kind: MouseKind,
+        button: CdpMouseButton,
+        mods: InputMods,
+    ) {
+        let _ = self.send(
+            page_id,
+            WebViewCommand::Mouse { x, y, kind, button, mods },
+        );
+    }
+
+    /// Forward a scroll event at page-local coordinates.
