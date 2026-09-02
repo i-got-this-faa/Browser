@@ -22,3 +22,16 @@ s.connect(sys.argv[1])
 time.sleep(8)   # hold it open silently while the browser must keep serving
 s.close()
 PYEOF
+SILENT=$!
+
+sleep 1
+start=$(date +%s.%N)
+reply=$(printf '{"cmd":"state"}\n' | timeout 5 nc -U "$SOCK")
+end=$(date +%s.%N)
+latency=$(python3 -c "print(f'{($end-$start)*1000:.0f}')")
+wait $SILENT 2>/dev/null || true
+
+sleep 1
+reply2=$(printf '{"cmd":"state"}\n' | timeout 5 nc -U "$SOCK")
+kill "$PID" 2>/dev/null || true
+
