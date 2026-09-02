@@ -36,3 +36,51 @@ ctl() { printf '%s\n' "$1" | timeout 10 nc -U "$SOCK"; }
 
 # Let it settle, then drive the requested scenario.
 sleep 3
+case "$RUN" in
+  standard)
+    ctl '{"cmd":"exec","arg":"page.new_beside"}' >/dev/null || true
+    sleep 2
+    ctl '{"cmd":"exec","arg":"focus.left"}' >/dev/null || true
+    sleep 2
+    ctl '{"cmd":"exec","arg":"overview.toggle"}' >/dev/null || true
+    sleep 2
+    ctl '{"cmd":"exec","arg":"overview.toggle"}' >/dev/null || true
+    sleep 2
+    ;;
+  idle)
+    ;;  # pure idle baseline: nothing but the frame pump
+  idle25)
+    sleep 22
+    ;;
+  navigate)
+    ctl '{"cmd":"prompt","arg":"example.com"}' >/dev/null || true
+    sleep 6
+    ctl '{"cmd":"exec","arg":"page.new_beside"}' >/dev/null || true
+    sleep 2
+    ;;
+  burst)
+    # Multi-page interaction: spawn pages, flip focus, toggle overview.
+    ctl '{"cmd":"exec","arg":"page.new_beside"}' >/dev/null || true
+    sleep 2
+    ctl '{"cmd":"exec","arg":"page.new_beside"}' >/dev/null || true
+    sleep 2
+    ctl '{"cmd":"exec","arg":"focus.left"}' >/dev/null || true
+    ctl '{"cmd":"exec","arg":"focus.right"}' >/dev/null || true
+    ctl '{"cmd":"exec","arg":"overview.toggle"}' >/dev/null || true
+    sleep 2
+    ctl '{"cmd":"exec","arg":"overview.toggle"}' >/dev/null || true
+    sleep 2
+    ;;
+  verify)
+    # Functional E2E: navigate, open a second page, report state.
+    ctl '{"cmd":"prompt","arg":"example.com"}'
+    sleep 5
+    ctl '{"cmd":"exec","arg":"page.new_beside"}' >/dev/null || true
+    sleep 2
+    ctl '{"cmd":"state"}'
+    ;;
+  *)
+    echo "unknown run: $RUN"; exit 1
+    ;;
+esac
+
