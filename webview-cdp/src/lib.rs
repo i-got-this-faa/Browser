@@ -717,3 +717,60 @@ pub mod testing {
                             body
                         )
                     };
+
+                    if path.starts_with("/json/list") {
+                        let body = format!(
+                            r#"[{{"type":"page","webSocketDebuggerUrl":"ws://127.0.0.1:{port}/devtools/page/1","title":"fake"}}]"#
+                        );
+                        writer.write_all(json_response(&body).as_bytes()).ok();
+                    } else if path.starts_with("/json/new") {
+                        let id = std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .unwrap()
+                            .subsec_nanos();
+                        let body = format!(
+                            r#"{{"type":"page","webSocketDebuggerUrl":"ws://127.0.0.1:{port}/devtools/page/{id}","title":"fake"}}"#
+                        );
+                        writer.write_all(json_response(&body).as_bytes()).ok();
+                    } else if path.starts_with("/devtools/") {
+                        let resp = "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: s3pPLMBiTxaQ9kYGzzhZRbK+xOo=\r\n\r\n";
+                        writer.write_all(resp.as_bytes()).ok();
+                        // Answer every call with {"id":N,"result":{}} so the
+                        // synchronous call path is exercised end to end.
+                        loop {
+                            match read_masked_client_frame(&mut reader) {
+                                Ok(payload) => {
+                                    let id = serde_json::from_slice::<Value>(&payload)
+                                        .ok()
+                                        .and_then(|v| v["id"].as_i64())
+                                        .unwrap_or(0);
+                                    let reply = format!("{{\"id\":{},\"result\":{{}}}}", id);
+                                    let mut frame = vec![0x81u8];
+                                    frame.push(reply.len() as u8);
+                                    frame.extend_from_slice(reply.as_bytes());
+                                    writer.write_all(&frame).ok();
+                                }
+                                Err(_) => break,
+                            }
+                        }
+                    }
+                }
+            });
+            Self { port, shutdown, thread: Some(thread) }
+        }
+    }
+
+    impl Drop for FakeCdpServer {
+        fn drop(&mut self) {
+            *self.shutdown.lock().unwrap() = true;
+            if let Ok(mut s) = TcpStream::connect(("127.0.0.1", self.port)) {
+                let _ = s.write_all(b"");
+            }
+            // Detach instead of join: the accept loop may still be inside a
+            // per-connection handler; blocking the test thread on it is not
+            // worth the complexity for a test helper.
+            drop(self.thread.take());
+        }
+    }
+}
+
