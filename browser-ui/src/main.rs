@@ -973,3 +973,24 @@ impl Shell {
             .bg(bar_bg)
             .text_size(px(11.0))
             .text_color(bar_text)
+    fn render_prompt(
+        &self,
+        text: String,
+        bar_bg: gpui::Hsla,
+        bar_text: gpui::Hsla,
+        accent: gpui::Hsla,
+    ) -> impl IntoElement {
+        let shown: SharedString = if text.is_empty() {
+            "search or enter address  (enter = go, esc = cancel)".into()
+        } else {
+            text.clone().into()
+        };
+        div().absolute().top(px(36.0)).left(px(0.0)).right(px(0.0)).flex().justify_center().child(
+            div()
+                .w(relative(0.6))
+                .px_3()
+                .py_2()
+                .rounded_md()
+                .bg(bar_bg)
+                .border_1()
+                .border_color(accent)
