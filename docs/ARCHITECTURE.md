@@ -76,3 +76,9 @@ pending events each frame, re-reads the file, re-parses, re-binds Lua, and
 fires `config_reloaded`. A broken file shows a toast and keeps the old
 config.
 
+## Workspaces
+
+`Strip` holds workspaces in a vertical stack (dynamic; `ctrl+1..4`,
+`workspace.new/next/prev`). Pages live on exactly one workspace's
+horizontal strip. `overview.toggle` is wired to state and shows all pages
+with their geometry unchanged (see browser.lua keys).
