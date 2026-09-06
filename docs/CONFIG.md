@@ -102,3 +102,10 @@ Before each command/hook call the shell sets:
 Also available: `browser.request { ... }` (emit a request) and
 `browser.log("...")` (stderr log).
 
+## Prompt
+
+`ctrl+k` opens the prompt (configurable via `focus.url`):
+
+- `example.com` → navigates
+- `two words` → searches via `search_engine_url`
+- `:workspace.focus 2` → runs a command
