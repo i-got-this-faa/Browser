@@ -579,3 +579,22 @@ void cef_view_reload(void* view, int hard) {
   }, id, hard));
 }
 
+void cef_view_resize(void* view, int32_t w, int32_t h) {
+  View* v = static_cast<View*>(view);
+  if (!v) return;
+  {
+    std::lock_guard<std::mutex> lk(v->geom_mu);
+    if (v->w == w && v->h == h) return;
+    v->w = w;
+    v->h = h;
+  }
+  uint64_t id = v->id;
+  CefPostTask(TID_UI, base::BindOnce([](uint64_t vid) {
+    ViewRef v;
+    { std::lock_guard<std::mutex> lk(g_views_mu);
+      auto it = g_views.find(vid);
+      if (it != g_views.end()) v = it->second; }
+    if (v && v->browser) v->browser->GetHost()->WasResized();
+  }, id));
+}
+
