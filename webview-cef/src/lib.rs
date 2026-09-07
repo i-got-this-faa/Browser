@@ -298,3 +298,11 @@ extern "C" fn sink(ev: *const ffi::CefEvent, _ud: *mut c_void) {
     }
 }
 
+fn cstr(p: *const std::os::raw::c_char) -> String {
+    if p.is_null() {
+        return String::new();
+    }
+    // SAFETY: shim passes a valid NUL-terminated UTF-8 string.
+    unsafe { std::ffi::CStr::from_ptr(p).to_string_lossy().into_owned() }
+}
+
