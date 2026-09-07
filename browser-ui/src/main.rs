@@ -994,3 +994,35 @@ impl Shell {
                 .bg(bar_bg)
                 .border_1()
                 .border_color(accent)
+    fn render_palette(
+        &self,
+        text: String,
+        matches: Vec<(String, String)>,
+        selected: usize,
+        bar_bg: gpui::Hsla,
+        bar_text: gpui::Hsla,
+        accent: gpui::Hsla,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
+        let sel = selected.min(matches.len().min(PALETTE_VISIBLE).saturating_sub(1));
+        let mut list = div().flex().flex_col();
+        for (i, (name, desc)) in matches.iter().take(PALETTE_VISIBLE).enumerate() {
+            list = list.child(
+                div()
+                    .flex()
+                    .flex_row()
+                    .justify_between()
+                    .px_3()
+                    .py_1()
+                    .text_size(px(12.0))
+                    .text_color(if i == sel { accent } else { bar_text })
+                    .child(name.clone())
+                    .child(desc.clone()),
+            );
+        }
+        div().absolute().top(px(36.0)).left(px(0.0)).right(px(0.0)).flex().justify_center().child(
+            div()
+                .w(relative(0.6))
+                .rounded_md()
+                .bg(bar_bg)
+                .border_1()
