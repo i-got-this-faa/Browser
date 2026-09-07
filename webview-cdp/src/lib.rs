@@ -774,3 +774,9 @@ pub mod testing {
     }
 }
 
+// ---------------------------------------------------------------------------
+// tests
+// ---------------------------------------------------------------------------
+
+/// Probe common Chromium-engine binaries on PATH. The Helium backend joins
+/// this list when its source is wired in.
