@@ -598,3 +598,16 @@ void cef_view_resize(void* view, int32_t w, int32_t h) {
   }, id));
 }
 
+void cef_view_focus(void* view, int focus) {
+  View* v = static_cast<View*>(view);
+  if (!v) return;
+  uint64_t id = v->id;
+  CefPostTask(TID_UI, base::BindOnce([](uint64_t vid, int f) {
+    ViewRef v;
+    { std::lock_guard<std::mutex> lk(g_views_mu);
+      auto it = g_views.find(vid);
+      if (it != g_views.end()) v = it->second; }
+    if (v && v->browser) v->browser->GetHost()->SetFocus(f != 0);
+  }, id, focus));
+}
+
