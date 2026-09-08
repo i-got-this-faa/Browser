@@ -780,3 +780,19 @@ pub mod testing {
 
 /// Probe common Chromium-engine binaries on PATH. The Helium backend joins
 /// this list when its source is wired in.
+pub fn which_chrome() -> Option<String> {
+    for p in ["google-chrome", "chromium", "chromium-browser"] {
+        if Command::new(p)
+            .arg("--version")
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .is_ok()
+        {
+            return Some(p.to_string());
+        }
+    }
+    None
+}
+
+#[cfg(test)]
