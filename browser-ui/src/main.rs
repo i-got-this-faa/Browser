@@ -1026,3 +1026,38 @@ impl Shell {
                 .rounded_md()
                 .bg(bar_bg)
                 .border_1()
+                .border_color(accent)
+                // The open menu owns the wheel: selection moves and the page
+                // behind must not scroll (occlude blocks scroll behind too).
+                .occlude()
+                .overflow_hidden()
+                .on_scroll_wheel(cx.listener(
+                    |this: &mut Self, ev: &gpui::ScrollWheelEvent, _window: &mut Window, cx| {
+                    // Wayland axis convention: positive y = wheel down.
+                    let dy = f32::from(ev.delta.pixel_delta(px(20.0)).y);
+                    if dy > 0.5 {
+                        this.palette_move(1);
+                    } else if dy < -0.5 {
+                        this.palette_move(-1);
+                    }
+                    cx.notify();
+                }))
+                .child(
+                    div()
+                        .px_3()
+                        .py_2()
+                        .text_size(px(14.0))
+                        .text_color(bar_text)
+                        .child(if text.is_empty() {
+                            SharedString::from(
+                                "type a command  (up/down or scroll = select, enter = run, tab = complete)",
+                            )
+                        } else {
+                            text.into()
+                        }),
+                )
+                .child(list),
+        )
+    }
+}
+
