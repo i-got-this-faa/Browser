@@ -86,3 +86,25 @@ fn serve(
 }
 
 /// Handle one request. Public so tests can drive a Shell without a socket.
+pub fn exec_line(shell: &mut Shell, line: &str, cx: &mut gpui::Context<Shell>) -> String {
+    let req: Value = match serde_json::from_str(line) {
+        Ok(v) => v,
+        Err(e) => return err(&format!("bad json: {e}")),
+    };
+    let cmd = req.get("cmd").and_then(Value::as_str).unwrap_or_default();
+    let arg = req.get("arg").and_then(Value::as_str).unwrap_or_default();
+
+    match cmd {
+        "state" => state_json(shell),
+        "exec" => {
+            if arg.is_empty() {
+                return err("exec needs arg");
+            }
+            shell.run_typed_command(arg, cx);
+            ok(&format!("exec {}", arg))
+        }
+        "prompt" => {
+            // Open the prompt, replace its address-bar prefill with the
+            // argument (typing replaces a selected prefill in a real bar),
+            // submit — the real UX path.
+            shell.run_typed_command("focus.url", cx);
