@@ -85,3 +85,9 @@ for i in $(seq 1 100); do
   [ -S "$STRIP_BROWSER_SOCK" ] && break
   sleep 0.2
 done
+if [ ! -S "$STRIP_BROWSER_SOCK" ]; then
+  echo "browser never opened control socket; log:"
+  cat "$RUN_DIR/browser.log"
+  exit 1
+fi
+
