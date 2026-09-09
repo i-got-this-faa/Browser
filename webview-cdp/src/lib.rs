@@ -796,3 +796,60 @@ pub fn which_chrome() -> Option<String> {
 }
 
 #[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::testing::FakeCdpServer;
+
+    fn data_dir(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "webview-cdp-{name}-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .subsec_nanos()
+        ));
+        dir
+    }
+
+    #[test]
+    fn fake_server_list_targets() {
+        let server = FakeCdpServer::start();
+        let targets = ChromeEngine::list_targets(server.port).unwrap();
+        assert_eq!(targets.len(), 1);
+        assert_eq!(targets[0].target_type, "page");
+        assert_eq!(targets[0].path(), "/devtools/page/1");
+    }
+
+    #[test]
+    fn attach_over_fake_cdp_and_send_commands() {
+        let server = FakeCdpServer::start();
+        // Full path: /json/new -> target -> ws session -> enabled domains.
+        let view = ChromeEngine::open_webview(server.port, "about:blank").unwrap();
+        view.send(WebViewCommand::Navigate("https://example.com".into())).unwrap();
+        view.send(WebViewCommand::Reload).unwrap();
+        view.send(WebViewCommand::Keys(vec![KeyInput::new("a", InputMods::default())])).unwrap();
+    }
+
+    #[test]
+    fn store_routes_commands() {
+        let server = FakeCdpServer::start();
+        let view = ChromeEngine::open_webview(server.port, "about:blank").unwrap();
+        let id = view.id();
+        let mut store = WebViewStore::default();
+        store.add(Box::new(view));
+        store.send(id, WebViewCommand::Resize { width: 800, height: 600 }).unwrap();
+        assert!(store.send(9999, WebViewCommand::Reload).is_err());
+    }
+
+    #[test]
+    fn key_translation_covers_specials_and_printables() {
+        assert_eq!(key_translation("enter").0.as_deref(), Some("\r"));
+        assert_eq!(key_translation("enter").1, 13);
+        assert_eq!(key_translation("a").0.as_deref(), Some("a"));
+        assert_eq!(key_translation("A").1, 65);
+        assert_eq!(key_translation("backspace").0, None);
+        let mods = InputMods { ctrl: true, shift: true, ..Default::default() };
+        assert_eq!(mods.cdp_modifiers(), 2 | 8);
+    }
+
+    #[test]
