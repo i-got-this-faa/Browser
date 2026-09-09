@@ -114,3 +114,36 @@ where
             }
             fn record_debug(&mut self, field: &tracing::field::Field, value: &dyn std::fmt::Debug) {
                 use std::fmt::Write;
+                if field.name() == "name" {
+                    self.name = Some(format!("{value:?}").trim_matches('"').to_string());
+                    return;
+                }
+                if !self.first {
+                    self.out.push(',');
+                }
+                self.first = false;
+                let _ = write!(self.out, "\"{}\":\"{:?}\"", field.name(), value);
+            }
+        }
+        let mut v = V { out: String::new(), first: true, name: None };
+        event.record(&mut v);
+        let meta = event.metadata();
+        // Events carry their display name in the `name` field (see
+        // browser_core::perf_event!); fall back to the callsite name.
+        let name = v.name.take().unwrap_or_else(|| meta.name().to_string());
+        let fields = if v.out.is_empty() {
+            String::new()
+        } else {
+            format!(",\"fields\":{{{}}}", v.out)
+        };
+        let line = format!(
+            "{{\"t\":{},\"ph\":\"E\",\"name\":\"{name}\",\"tid\":\"{}\"{}}}\n",
+            unix_us(),
+            thread_label(),
+            fields,
+        );
+        write_line(file, &line);
+    }
+}
+
+/// Install the JSONL layer when `STRIP_TRACE` is set. Returns the path.
