@@ -219,3 +219,33 @@ impl EngineController {
     }
 
     /// Forward a scroll event at page-local coordinates.
+    pub fn scroll(&self, page_id: u64, x: i32, y: i32, dx: i32, dy: i32) {
+        let _ = self.send(page_id, WebViewCommand::Scroll { x, y, dx, dy });
+    }
+
+    /// Send printable text input to the page.
+    pub fn keys(&self, page_id: u64, keys: Vec<KeyInput>) {
+        if keys.is_empty() {
+            return;
+        }
+        let _ = self.send(page_id, WebViewCommand::Keys(keys));
+    }
+
+    /// Paint the page's raw BGRA frame through `f` (CEF backend only).
+    /// The closure receives the stable shim buffer under its lock together
+    /// with damage rects since the last paint (empty == full frame).
+    pub fn paint(
+        &self,
+        page_id: u64,
+        f: impl FnOnce(&[u8], i32, i32, &[[i32; 4]]),
+    ) -> bool {
+        let shared = self.shared.lock().unwrap();
+        match shared.views.get(&page_id) {
+            Some(PageView::Cef(v)) => {
+                v.with_frame(f);
+                true
+            }
+            _ => false,
+        }
+    }
+
