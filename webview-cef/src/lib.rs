@@ -306,3 +306,12 @@ fn cstr(p: *const std::os::raw::c_char) -> String {
     unsafe { std::ffi::CStr::from_ptr(p).to_string_lossy().into_owned() }
 }
 
+// ---------------------------------------------------------------------------
+// Engine
+// ---------------------------------------------------------------------------
+
+/// The one CEF engine per process.
+pub struct CefEngine {
+    _private: (),
+}
+
