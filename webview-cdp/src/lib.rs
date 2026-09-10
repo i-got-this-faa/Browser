@@ -853,3 +853,61 @@ mod tests {
     }
 
     #[test]
+    fn devtools_target_path_parses() {
+        let t: DevtoolsTarget = serde_json::from_str(
+            r#"{"type":"page","webSocketDebuggerUrl":"ws://127.0.0.1:9222/devtools/page/ABC-123"}"#,
+        )
+        .unwrap();
+        assert_eq!(t.path(), "/devtools/page/ABC-123");
+    }
+
+    fn which_chrome_test_helper() -> Option<String> {
+        super::which_chrome()
+    }
+
+    #[test]
+    fn real_chrome_frame_if_available() {
+        // Strongest check: real engine, real screencast frame. Skips when no
+        // chrome binary exists on the machine.
+        let chrome = match which_chrome_test_helper() {
+            Some(c) => c,
+            None => {
+                eprintln!("skip: no chrome binary found");
+                return;
+            }
+        };
+        let engine = ChromeEngine::spawn(&chrome, 0, &data_dir("real-frame")).unwrap();
+        let view = engine
+            .new_webview("data:text/html,<title>probe</title><h1>probe-page</h1>")
+            .unwrap();
+        let deadline = std::time::Instant::now() + Duration::from_secs(20);
+        let mut got_frame = false;
+        let mut nudged = false;
+        while std::time::Instant::now() < deadline {
+            match view.events().try_recv() {
+                Ok(WebViewEvent::Frame { data, width, height }) => {
+                    assert!(width > 0 && height > 0);
+                    assert_eq!(&data[..4], &[0x89, b'P', b'N', b'G'], "screencast must be png");
+                    got_frame = true;
+                    break;
+                }
+                Ok(_) => continue,
+                Err(_) => {
+                    if !nudged {
+                        // Animated content forces the compositor to keep
+                        // producing frames even when throttled.
+                        let _ = view.send(WebViewCommand::Navigate(
+                            "data:text/html,<style>h1{animation:p 1s infinite}@keyframes p{50%{color:red}}</style><h1>probe</h1>"
+                                .into(),
+                        ));
+                        nudged = true;
+                    }
+                    std::thread::sleep(Duration::from_millis(100));
+                }
+            }
+        }
+        assert!(got_frame, "no screencast frame from real chrome");
+        Box::new(view).close().unwrap();
+        engine.shutdown();
+    }
+}
