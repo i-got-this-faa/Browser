@@ -68,3 +68,45 @@ def main():
 
     # Rank by total time (spans) then by count (events) weighted per second.
     ranked = []
+    for name, durs in span_dur.items():
+        durs.sort()
+        total_us = sum(durs)
+        ranked.append((total_us / 1000.0, name, len(durs), {
+            "mean_us": total_us / len(durs),
+            "p95_us": pct(durs, 0.95),
+            "max_us": durs[-1],
+            "per_s": len(durs) / wall_s,
+        }))
+    ranked.sort(reverse=True)
+
+    print(f"trace: {path}")
+    print(f"wall: {wall_s:.1f}s  rows: {len(rows)}  "
+          f"spans: {sum(len(d) for d in span_dur.values())}  "
+          f"events: {len(rows) - sum(len(d) for d in span_dur.values())}")
+    print()
+    print(f"{'name':<26}{'count':>8}{'per_s':>9}{'total_ms':>10}"
+          f"{'mean_us':>10}{'p95_us':>9}{'max_ms':>9}")
+    for total_ms, name, count, st in ranked[:top_n]:
+        print(f"{name:<26}{count:>8}{st['per_s']:>9.1f}{total_ms:>10.1f}"
+              f"{st['mean_us']:>10.1f}{st['p95_us']:>9.0f}{st['max_us'] / 1000.0:>9.2f}")
+
+    print("\n-- event field breakdown --")
+    ev_names = sorted({r["name"] for r in rows if r.get("ph") != "X"})
+    for name in ev_names:
+        tot = field_total.get(name) or {}
+        if not tot:
+            continue
+        parts = ", ".join(
+            f"{k}: sum={v}" + (f" max={field_max[name][k]}" if k in field_max else "")
+            for k, v in sorted(tot.items())
+        )
+        count_line = ""
+        tops = field_top.get(name) or {}
+        if tops:
+            best = sorted(tops.items(), key=lambda kv: -kv[1])[:4]
+            count_line = "  |  " + ", ".join(f"{a} x{b}" for a, b in best)
+        print(f"{name:<26} {parts}{count_line}")
+
+
+if __name__ == "__main__":
+    main()
