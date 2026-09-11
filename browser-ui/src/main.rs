@@ -1074,3 +1074,13 @@ fn is_url(text: &str) -> bool {
         || (text.contains('.') && !text.contains(' '))
 }
 
+fn truncate(s: &str, n: usize) -> String {
+    if s.chars().count() <= n {
+        s.to_string()
+    } else {
+        let t: String = s.chars().take(n.saturating_sub(1)).collect();
+        format!("{t}…")
+    }
+}
+
+/// GPUI keystroke -> our config's `ctrl+shift+t` style string.
