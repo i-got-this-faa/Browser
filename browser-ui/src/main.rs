@@ -1065,3 +1065,12 @@ impl Shell {
 // helpers
 // ---------------------------------------------------------------------------
 
+fn is_url(text: &str) -> bool {
+    text.starts_with("http://")
+        || text.starts_with("https://")
+        || text.starts_with("about:")
+        || text.starts_with("file://")
+        || text.starts_with("data:")
+        || (text.contains('.') && !text.contains(' '))
+}
+
