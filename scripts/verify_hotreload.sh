@@ -31,3 +31,8 @@ sleep 1
 kill "$PID" 2>/dev/null || true
 
 ok=$(python3 -c "print('yes' if abs($before-0.78)<0.01 and abs($after-0.55)<0.01 else 'no')")
+if [ "$ok" = "yes" ]; then
+  echo "HOT RELOAD: PASS"
+else
+  echo "HOT RELOAD: FAIL (before=$before after=$after)"
+fi
