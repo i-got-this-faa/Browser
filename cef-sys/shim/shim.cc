@@ -624,3 +624,31 @@ void cef_view_hidden(void* view, int hidden) {
   }, id, hidden));
 }
 
+void cef_view_mouse(void* view, int kind, int button, int x, int y,
+                    int click_count) {
+  View* v = static_cast<View*>(view);
+  if (!v) return;
+  uint64_t id = v->id;
+  CefPostTask(TID_UI, base::BindOnce(
+      [](uint64_t vid, int kind, int button, int x, int y, int cc) {
+        ViewRef v;
+        { std::lock_guard<std::mutex> lk(g_views_mu);
+          auto it = g_views.find(vid);
+          if (it != g_views.end()) v = it->second; }
+        if (!v || !v->browser) return;
+        CefMouseEvent ev;
+        ev.x = x;
+        ev.y = y;
+        ev.modifiers = 0;
+        auto host = v->browser->GetHost();
+        if (kind == 0) {
+          host->SendMouseMoveEvent(ev, false);
+        } else if (kind == 1 || kind == 2) {
+          bool up = kind == 2;
+          host->SendMouseClickEvent(
+              ev, button == 0 ? MBT_LEFT : button == 1 ? MBT_MIDDLE : MBT_RIGHT,
+              up, cc);
+        }
+      }, id, kind, button, x, y, click_count));
+}
+
