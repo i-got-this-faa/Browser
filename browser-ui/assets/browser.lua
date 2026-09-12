@@ -74,3 +74,30 @@ return {
     { "ctrl+shift+e",  "config.reload" },
     { "ctrl+q",        "app.quit" },
   },
+
+  commands = {
+    ["my.hackernews"] = {
+      desc = "Open Hacker News beside this page",
+      run = function()
+        browser.request { "page.new_beside" }
+        return { "page.navigate", "https://news.ycombinator.com" }
+      end,
+    },
+
+    ["my.to-work"] = {
+      desc = "Move the active page to workspace 2 (work)",
+      run = function()
+        return { cmd = "page.to_workspace", arg = 2 }
+      end,
+    },
+  },
+
+  events = {
+    page_created = function(page)
+      -- Send social media to workspace 3 automatically.
+      if page.url:find("^https://twitter") or page.url:find("^https://x%.com") then
+        return { cmd = "page.to_workspace", arg = 3 }
+      end
+    end,
+  },
+}
