@@ -84,3 +84,10 @@ case "$RUN" in
     ;;
 esac
 
+# Give the final frames a moment to land, then stop.
+sleep 1
+kill "$BROWSER_PID" 2>/dev/null || true
+wait "$BROWSER_PID" 2>/dev/null || true
+trap - EXIT
+
+python3 "$ROOT/scripts/trace_report.py" "$TRACE" 18
