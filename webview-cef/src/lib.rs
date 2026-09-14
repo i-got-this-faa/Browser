@@ -315,3 +315,32 @@ pub struct CefEngine {
     _private: (),
 }
 
+impl CefEngine {
+    /// Start CEF (windowless, CEF-owned UI thread). `exe` is this binary (the
+    /// standard CEF single-binary subprocess pattern); resource paths resolve
+    /// to the vendored CEF layout.
+    pub fn start(exe: &str, resources: &str, locales: &str, cache: &str) -> Result<Self> {
+        let c_exe = CString::new(exe)?;
+        let c_res = CString::new(resources)?;
+        let c_loc = CString::new(locales)?;
+        let c_cache = CString::new(cache)?;
+        // SAFETY: one-time init before any view exists; strings outlive call.
+        let rc = unsafe {
+            ffi::cef_engine_start(
+                c_exe.as_ptr(),
+                c_res.as_ptr(),
+                c_loc.as_ptr(),
+                c_cache.as_ptr(),
+            )
+        };
+        if rc != 0 {
+            return Err(anyhow!("cef_engine_start rc={rc}"));
+        }
+        unsafe { ffi::cef_set_sink(sink, std::ptr::null_mut()) };
+        Ok(Self { _private: () })
+    }
+}
+
+/// Early process check: if this invocation is a CEF child process
+/// (renderer/gpu/utility), the caller must exit with the returned code
+/// immediately instead of running the shell.
