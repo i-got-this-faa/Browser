@@ -1084,3 +1084,16 @@ fn truncate(s: &str, n: usize) -> String {
 }
 
 /// GPUI keystroke -> our config's `ctrl+shift+t` style string.
+fn keystroke_string(ks: &gpui::Keystroke) -> String {
+    let mut out = String::new();
+    let m = &ks.modifiers;
+    if m.control { out.push_str("ctrl+"); }
+    if m.alt { out.push_str("alt+"); }
+    if m.shift { out.push_str("shift+"); }
+    if m.platform { out.push_str("cmd+"); }
+    out.push_str(&ks.key);
+    out
+}
+
+/// Our `ctrl+shift+t` style string -> a synthetic GPUI keystroke (control
+/// socket). key_char set for printable singles so overlay typing works.
