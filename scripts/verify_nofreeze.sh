@@ -35,3 +35,8 @@ sleep 1
 reply2=$(printf '{"cmd":"state"}\n' | timeout 5 nc -U "$SOCK")
 kill "$PID" 2>/dev/null || true
 
+if echo "$reply" | grep -q '"ok":true' && echo "$reply2" | grep -q '"ok":true'; then
+  echo "NO-FREEZE: PASS (state answered in ${latency}ms during silent client)"
+else
+  echo "NO-FREEZE: FAIL (reply1=$reply reply2=$reply2)"
+fi
