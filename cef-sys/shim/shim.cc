@@ -671,3 +671,26 @@ void cef_view_wheel(void* view, int x, int y, int dx, int dy) {
       }, id, x, y, dx, dy));
 }
 
+void cef_view_key(void* view, int type, int windows_key_code,
+                  int native_key_code, uint32_t mods, uint16_t ch16) {
+  View* v = static_cast<View*>(view);
+  if (!v) return;
+  uint64_t id = v->id;
+  CefPostTask(TID_UI, base::BindOnce(
+      [](uint64_t vid, int type, int wkc, int nkc, uint32_t mods,
+         uint16_t ch16) {
+        ViewRef v;
+        { std::lock_guard<std::mutex> lk(g_views_mu);
+          auto it = g_views.find(vid);
+          if (it != g_views.end()) v = it->second; }
+        if (!v || !v->browser) return;
+        CefKeyEvent ev;
+        ev.type = static_cast<cef_key_event_type_t>(type);
+        ev.windows_key_code = wkc;
+        ev.native_key_code = nkc;
+        ev.modifiers = mods;
+        ev.character = ch16;
+        ev.unmodified_character = ch16;
+        v->browser->GetHost()->SendKeyEvent(ev);
+      }, id, type, windows_key_code, native_key_code, mods, ch16));
+}
