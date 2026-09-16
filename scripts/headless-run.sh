@@ -91,3 +91,11 @@ if [ ! -S "$STRIP_BROWSER_SOCK" ]; then
   exit 1
 fi
 
+ctl() { printf '%s\n' "$1" | timeout 10 nc -U "$STRIP_BROWSER_SOCK"; }
+
+echo "== smoke: state =="
+ctl '{"cmd":"state"}'
+
+echo "== harness ready: sock=$STRIP_BROWSER_SOCK shots=$SHOTS =="
+echo "RUN_DIR=$RUN_DIR"
+wait "$BROWSER_PID" 2>/dev/null || true
