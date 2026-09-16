@@ -63,3 +63,12 @@ fn bench_snapshot(pages: usize, iters: u32) {
     );
 }
 
+fn main() {
+    println!("== strip layout hot path ==");
+    for n in [1, 4, 16, 64, 256] {
+        bench("frame_geometries + visible", n, 20_000);
+    }
+    for n in [1, 16, 256] {
+        bench_snapshot(n, 20_000);
+    }
+}
