@@ -1097,3 +1097,32 @@ fn keystroke_string(ks: &gpui::Keystroke) -> String {
 
 /// Our `ctrl+shift+t` style string -> a synthetic GPUI keystroke (control
 /// socket). key_char set for printable singles so overlay typing works.
+fn parse_binding(binding: &str) -> gpui::Keystroke {
+    let mut mods = gpui::Modifiers::none();
+    let mut key = binding.to_string();
+    loop {
+        let Some(idx) = key.find('+') else { break };
+        let (m, rest) = key.split_at(idx);
+        let rest = &rest[1..];
+        match m {
+            "ctrl" | "control" => mods.control = true,
+            "alt" => mods.alt = true,
+            "shift" => mods.shift = true,
+            "cmd" | "super" => mods.platform = true,
+            _ => break,
+        }
+        key = rest.to_string();
+    }
+    let key_char = if mods == gpui::Modifiers::none()
+        && key.chars().count() == 1
+        && key.chars().next().unwrap().is_ascii_graphic()
+    {
+        Some(key.clone())
+    }
+    else {
+        None
+    };
+    gpui::Keystroke { modifiers: mods, key, key_char }
+}
+
+/// GPUI keystroke -> (cdp text, windows vk).
