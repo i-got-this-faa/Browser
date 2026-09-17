@@ -147,3 +147,12 @@ where
 }
 
 /// Install the JSONL layer when `STRIP_TRACE` is set. Returns the path.
+pub fn init_from_env() -> Option<String> {
+    let path = std::env::var("STRIP_TRACE").ok()?;
+    let file = File::create(&path).ok()?;
+    let layer = JsonlLayer { file: Some(Mutex::new(file)), spans: Mutex::new(HashMap::new()) };
+    let subscriber = tracing_subscriber::registry().with(layer);
+    tracing::subscriber::set_global_default(subscriber).ok()?;
+    eprintln!("perf trace -> {path}");
+    Some(path)
+}
