@@ -1126,3 +1126,33 @@ fn parse_binding(binding: &str) -> gpui::Keystroke {
 }
 
 /// GPUI keystroke -> (cdp text, windows vk).
+fn cdp_key(ks: &gpui::Keystroke) -> (Option<String>, u32) {
+    if let Some(c) = &ks.key_char {
+        if c.chars().count() == 1 && ks.modifiers == gpui::Modifiers::none() {
+            let vk = c.chars().next().unwrap().to_ascii_uppercase() as u32;
+            return (Some(c.clone()), vk);
+        }
+    }
+    match ks.key.as_str() {
+        "enter" => (Some("\r".into()), 13),
+        "tab" => (Some("\t".into()), 9),
+        "backspace" => (None, 8),
+        "escape" => (None, 27),
+        "delete" => (None, 46),
+        "left" => (None, 37),
+        "up" => (None, 38),
+        "right" => (None, 39),
+        "down" => (None, 40),
+        "home" => (None, 36),
+        "end" => (None, 35),
+        "pageup" => (None, 33),
+        "pagedown" => (None, 34),
+        "space" => (Some(" ".into()), 32),
+        other if other.chars().count() == 1 => {
+            let c = other.chars().next().unwrap();
+            (Some(c.to_string()), c.to_ascii_uppercase() as u32)
+        }
+        _ => (None, 0),
+    }
+}
+
