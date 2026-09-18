@@ -344,3 +344,29 @@ impl CefEngine {
 /// Early process check: if this invocation is a CEF child process
 /// (renderer/gpu/utility), the caller must exit with the returned code
 /// immediately instead of running the shell.
+mod tests {
+    use super::*;
+
+    #[test]
+    fn registry_routes_by_abi_id() {
+        // Registry mechanics without a live engine (no CEF init in tests).
+        let (tx, rx) = channel();
+        let damage: Arc<Mutex<Option<Vec<[i32; 4]>>>> = Arc::new(Mutex::new(None));
+        registry().lock().unwrap().insert(
+            42,
+            Sink { tx: Some(tx.clone()), damage: Arc::clone(&damage) },
+        );
+        *damage.lock().unwrap() = Some(vec![[1, 2, 3, 4]]);
+        {
+            let entry = registry().lock().unwrap().get(&42).map(|s| Sink {
+                tx: s.tx.clone(),
+                damage: Arc::clone(&s.damage),
+            });
+            let e = entry.unwrap();
+            assert_eq!(e.damage.lock().unwrap().take().unwrap(), vec![[1, 2, 3, 4]]);
+            let _ = e.tx.as_ref().unwrap().send(WebViewEvent::TitleChanged("t".into()));
+        }
+        registry().lock().unwrap().remove(&42);
+        assert!(matches!(rx.try_recv(), Ok(WebViewEvent::TitleChanged(t)) if t == "t"));
+    }
+}
