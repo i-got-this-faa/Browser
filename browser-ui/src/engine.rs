@@ -249,3 +249,35 @@ impl EngineController {
         }
     }
 
+    /// Popup layer state (CEF backend).
+    pub fn popup_info(&self, page_id: u64) -> Option<(bool, [i32; 4])> {
+        let shared = self.shared.lock().unwrap();
+        match shared.views.get(&page_id) {
+            Some(PageView::Cef(v)) => Some((v.popup_visible(), v.popup_rect())),
+            _ => None,
+        }
+    }
+
+    /// Poll every webview for events; return (page_id, event) pairs.
+    pub fn drain_events(&self) -> Vec<(u64, WebViewEvent)> {
+        let shared = self.shared.lock().unwrap();
+        let mut out = Vec::new();
+        for (page_id, view) in shared.views.iter() {
+            for ev in view.as_webview().events().try_iter() {
+                out.push((*page_id, ev));
+            }
+        }
+        browser_core::perf_event!("engine.drained", "events" => out.len(),
+            "views" => shared.views.len());
+        out
+    }
+
+    pub fn shutdown(&self) {
+        if let Some(engine) = &self.cdp_engine {
+            engine.shutdown();
+        }
+        if let Some(dir) = &self.cdp_data_dir {
+            let _ = std::fs::remove_dir_all(dir);
+        }
+    }
+}
