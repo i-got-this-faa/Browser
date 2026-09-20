@@ -1156,3 +1156,14 @@ fn cdp_key(ks: &gpui::Keystroke) -> (Option<String>, u32) {
     }
 }
 
+fn cdp_mods(m: &gpui::Modifiers) -> webview_cdp::InputMods {
+    webview_cdp::InputMods {
+        ctrl: m.control,
+        alt: m.alt,
+        shift: m.shift,
+        meta: m.platform,
+    }
+}
+
+/// Decode PNG bytes into a BGRA frame. GPUI `RenderImage` frames are BGRA
+/// (see gpui assets.rs), so the R/B swap happens here, once per frame.
