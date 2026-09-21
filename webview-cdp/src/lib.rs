@@ -499,6 +499,52 @@ impl ChromeEngine {
             .with_context(|| format!("connect to {port} for /json/list"))?;
         stream.set_read_timeout(Some(Duration::from_secs(5))).ok();
         let req = format!(
+            "GET /json/list HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nConnection: close\r\n\r\n"
+        );
+        stream.write_all(req.as_bytes())?;
+        let body = read_http_response(&mut stream)?;
+        let targets: Vec<DevtoolsTarget> =
+            serde_json::from_str(&body).with_context(|| format!("parse /json/list body: {body}"))?;
+        Ok(targets.into_iter().filter(|t| t.target_type == "page").collect())
+    }
+
+    /// Create a new WebView (CDP target) in this engine.
+    pub fn new_webview(&self, url: &str) -> Result<CdpWebView> {
+        Self::open_webview(self.port, url)
+    }
+
+    /// Open a WebView on any CDP endpoint (also used by tests).
+    pub fn open_webview(port: u16, url: &str) -> Result<CdpWebView> {
+        log_step("open: connecting");
+        let mut stream = TcpStream::connect(("127.0.0.1", port))?;
+        stream.set_read_timeout(Some(Duration::from_secs(5))).ok();
+        let req = format!(
+            "PUT /json/new?{} HTTP/1.1\r\nHost: 127.0.0.1:{}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+            urlencode(url),
+            port
+        );
+        stream.write_all(req.as_bytes())?;
+        let body = read_http_response(&mut stream)?;
+        let target: DevtoolsTarget =
+            serde_json::from_str(&body).with_context(|| format!("parse /json/new body: {body}"))?;
+        log_step(&format!("open: target at {}", target.path()));
+
+        let (session, events) = CdpSession::connect(port, &target.path())?;
+        log_step("open: session connected");
+        let view = CdpWebView::attach(Arc::new(session), events)?;
+        log_step("open: attached");
+        Ok(view)
+    }
+
+    /// Terminate the engine.
+    pub fn shutdown(&self) {
+        if let Ok(mut child) = self.child.lock() {
+            let _ = child.kill();
+            let _ = child.wait();
+        }
+    }
+}
+
 fn log_step(msg: &str) {
     #[cfg(feature = "debug-spawn")]
     eprintln!("[cdp {msg}]");
