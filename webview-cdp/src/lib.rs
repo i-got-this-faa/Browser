@@ -555,6 +555,46 @@ fn log_step(msg: &str) {
 /// Read one full HTTP response. Chrome's DevTools server keeps the socket
 /// open even with `Connection: close`, so we must stop exactly at
 /// `Content-Length` instead of reading to EOF.
+fn read_http_response(stream: &mut TcpStream) -> Result<String> {
+    let mut buf: Vec<u8> = Vec::with_capacity(4096);
+    let mut chunk = [0u8; 4096];
+    let header_end = loop {
+        let n = stream.read(&mut chunk)?;
+        if n == 0 {
+            anyhow::bail!("connection closed before response headers completed");
+        }
+        buf.extend_from_slice(&chunk[..n]);
+        if let Some(pos) = find_subslice(&buf, b"\r\n\r\n") {
+            break pos + 4;
+        }
+        if buf.len() > 256 * 1024 {
+            anyhow::bail!("response headers too large");
+        }
+    };
+    let headers = String::from_utf8_lossy(&buf[..header_end]).to_string();
+    let content_length = headers
+        .lines()
+        .find_map(|l| {
+            let (k, v) = l.split_once(':')?;
+            let ok = k.trim().eq_ignore_ascii_case("content-length");
+            ok.then(|| v.trim().parse::<usize>().ok()).flatten()
+        })
+        .unwrap_or(0);
+    while buf.len() < header_end + content_length {
+        let n = stream.read(&mut chunk)?;
+        if n == 0 {
+            break; // some servers close after body; accept what we have
+        }
+        buf.extend_from_slice(&chunk[..n]);
+    }
+    let body = String::from_utf8_lossy(&buf[header_end..]).to_string();
+    Ok(body.chars().take(content_length).collect())
+}
+
+fn find_subslice(haystack: &[u8], needle: &[u8]) -> Option<usize> {
+    haystack.windows(needle.len()).position(|w| w == needle)
+}
+
 fn urlencode(s: &str) -> String {
     let mut out = String::new();
     for b in s.bytes() {
