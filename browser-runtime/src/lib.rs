@@ -18,6 +18,12 @@ pub use mlua::Value as LuaValue;
 pub use state::{BrowserState, PageSlot};
 
 // ---------------------------------------------------------------------------
+// Requests: everything Lua (and by extension keybinds/config) may ask for
+// ---------------------------------------------------------------------------
+
+/// One unit of work for the shell. Pure data: serializable, testable.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(tag = "type", content = "args", rename_all = "snake_case")]
 pub enum Request {
     /// Navigate the active page (or open a first page).
     Navigate(String),
