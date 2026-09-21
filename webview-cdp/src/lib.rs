@@ -415,6 +415,17 @@ impl CdpSession {
     }
 }
 
+impl Drop for CdpSession {
+    fn drop(&mut self) {
+        // Unblock the reader thread deterministically: it holds a clone of
+        // this socket and blocks on read; shutdown makes read fail with a
+        // non-timeout error so the thread exits and peer loops unwind.
+        if let Ok(w) = self.write_half.lock() {
+            let _ = w.shutdown(std::net::Shutdown::Both);
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Chrome engine
 // ---------------------------------------------------------------------------
