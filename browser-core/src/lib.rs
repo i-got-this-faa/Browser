@@ -109,6 +109,27 @@ impl Strip {
 
     /// Insert a page to the right of the active page, bumping others.
     /// New pages never resize existing pages.
+    pub fn insert_beside(&mut self, page: Page) {
+        let Some(active) = self.active() else {
+            let id = page.id;
+            self.pages.push(page);
+            if self.active_page.is_none() {
+                self.active_page = Some(id);
+            }
+            return;
+        };
+        let insert_x = active.right() + self.gap;
+        for p in self.pages.iter_mut() {
+            if p.workspace == page.workspace && p.x >= insert_x {
+                p.x += page.width + self.gap;
+            }
+        }
+        let mut page = page;
+        page.x = insert_x;
+        self.pages.push(page);
+    }
+
+    /// Remove a page and close the gap left of its slot.
     pub fn remove(&mut self, id: PageId) -> Option<Page> {
         let idx = self.pages.iter().position(|p| p.id == id)?;
         let page = self.pages.remove(idx);
