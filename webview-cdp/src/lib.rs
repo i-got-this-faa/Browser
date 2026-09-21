@@ -206,6 +206,11 @@ fn read_frame(reader: &mut BufReader<TcpStream>) -> Result<Vec<u8>> {
 /// are routed back to synchronous callers by the reader thread.
 struct CdpSession {
     write_half: Arc<Mutex<TcpStream>>,
+    pending: Arc<Mutex<HashMap<i64, Sender<Value>>>>,
+    next_id: Arc<AtomicI64>,
+}
+
+#[derive(Deserialize)]
 pub struct DevtoolsTarget {
     #[serde(rename = "type")]
     pub target_type: String,
@@ -255,6 +260,13 @@ impl CdpSession {
         }
 
         let write_half = Arc::new(Mutex::new(stream));
+        let pending: Arc<Mutex<HashMap<i64, Sender<Value>>>> = Arc::default();
+        let next_id = Arc::new(AtomicI64::new(1));
+        let session = Self {
+            write_half: write_half.clone(),
+            pending: pending.clone(),
+            next_id: next_id.clone(),
+        };
 
         // Reader thread: routes responses to pending callers, events outward.
         let event_tx = channel::<WebViewEvent>();

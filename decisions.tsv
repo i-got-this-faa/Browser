@@ -1,3 +1,4 @@
 ts	phase	decision	why	evidence	result
 2026-09-22T00:07+05:30	frame	building GPUI shell (gpui 0.2.2 crates.io) + CDP-driven Chrome for web content, not forking Helium source now	full Helium/Chromium fork is multi-GB/licensing-scale; CDP gives real Chromium content today behind the same WebView trait the Helium backend will implement	target/debug exists, gpui in cargo cache	open
 2026-09-22T00:30+05:30	layout	strip owns page geometry: insert_beside assigns the slot, callers never pass x	API allowed invalid x values; tests proved the flaw before runtime did	cargo test -p browser-core	6+4 tests green
+2026-09-22T00:35+05:30	webview	synchronous CDP calls via pending-map + reader thread, not fire-and-forget	back/forward needs getNavigationHistory results; fire-and-forget cannot implement it	src/webview-cdp/src/lib.rs	attach test green
