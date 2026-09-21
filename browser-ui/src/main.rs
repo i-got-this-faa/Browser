@@ -1167,3 +1167,12 @@ fn cdp_mods(m: &gpui::Modifiers) -> webview_cdp::InputMods {
 
 /// Decode PNG bytes into a BGRA frame. GPUI `RenderImage` frames are BGRA
 /// (see gpui assets.rs), so the R/B swap happens here, once per frame.
+fn decode_png_bgra(png: &[u8]) -> Option<image::RgbaImage> {
+    let mut img = image::load_from_memory(png).ok()?.into_rgba8();
+    for px in img.pixels_mut() {
+        px.0.swap(0, 2);
+    }
+    Some(img)
+}
+
+/// Parse `#rrggbb`/`#rrggbbaa` theme colors into GPUI Hsla.
