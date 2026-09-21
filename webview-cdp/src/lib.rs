@@ -198,6 +198,33 @@ fn read_frame(reader: &mut BufReader<TcpStream>) -> Result<Vec<u8>> {
 }
 
 /// Client frames are always masked; mask bytes follow the payload on the wire.
+fn read_masked_client_frame(reader: &mut BufReader<TcpStream>) -> Result<Vec<u8>> {
+    let mut header = [0u8; 2];
+    reader.read_exact(&mut header)?;
+    let len = match header[1] & 0x7F {
+        126 => {
+            let mut b = [0u8; 2];
+            reader.read_exact(&mut b)?;
+            u16::from_be_bytes(b) as usize
+        }
+        127 => {
+            let mut b = [0u8; 8];
+            reader.read_exact(&mut b)?;
+            u64::from_be_bytes(b) as usize
+        }
+        n => n as usize,
+    };
+    // Wire order: mask bytes come immediately after the header, before payload.
+    let mut mask = [0u8; 4];
+    reader.read_exact(&mut mask)?;
+    let mut payload = vec![0u8; len];
+    reader.read_exact(&mut payload)?;
+    for (i, b) in payload.iter_mut().enumerate() {
+        *b ^= mask[i % 4];
+    }
+    Ok(payload)
+}
+
 // ---------------------------------------------------------------------------
 // CDP session
 // ---------------------------------------------------------------------------
