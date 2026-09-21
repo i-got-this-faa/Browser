@@ -69,6 +69,37 @@ impl BrowserState {
 
     /// Insert a brand-new page beside the active one, with a slot, and give
     /// it focus (niri: new windows take focus). Returns the new page id.
+    pub fn add_page(&mut self, url: &str, vp: &Viewport) -> PageId {
+        let id = self.strip.alloc_id();
+        let width = vp.page_width(self.strip.page_fraction);
+        let page = Page::new(id, self.strip.active_workspace, url, 0.0, width);
+        if self.strip.active_page.is_some() {
+            self.strip.insert_beside(page.clone());
+        } else {
+            // First page on the strip takes x = 0.
+            self.strip.pages.push(page.clone());
+        }
+        self.strip.active_page = Some(id);
+        self.slots.insert(
+            id,
+            PageSlot { page, webview_id: None, frame_png: None, loading: true },
+        );
+        self.scroll = scroll_to_active(&self.strip, vp);
+        id
+    }
+
+    /// Remove a page and its slot; choose a sensible successor focus.
+    pub fn close_page(&mut self, id: PageId, vp: &Viewport) -> Option<PageId> {
+        let removed = self.strip.remove(id)?;
+        self.slots.remove(&id);
+        let next = self.strip.pick_active_after_remove(&removed);
+        self.strip.active_page = next;
+        if let Some(n) = next {
+            self.scroll = scroll_to_page(&self.strip, vp, n);
+        }
+        next
+    }
+
     pub fn focus_page(&mut self, id: PageId, vp: &Viewport) {
         if self.strip.page(id).is_some() {
             self.strip.active_page = Some(id);
