@@ -636,6 +636,16 @@ impl CdpWebView {
         session.call("Emulation.setFocusEmulationEnabled", json!({ "enabled": true }))?;
         // NOTE: format/quality are flat CDP params, not a nested object.
         session.call(
+            "Page.startScreencast",
+            json!({
+                "format": "png",
+                "everyNthFrame": 1
+            }),
+        )?;
+        Ok(Self { id: alloc_webview_id(), session, events })
+    }
+}
+
 impl WebView for CdpWebView {
     fn id(&self) -> WebViewId {
         self.id
