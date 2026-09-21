@@ -1176,3 +1176,9 @@ fn decode_png_bgra(png: &[u8]) -> Option<image::RgbaImage> {
 }
 
 /// Parse `#rrggbb`/`#rrggbbaa` theme colors into GPUI Hsla.
+fn hex(s: &str) -> gpui::Hsla {
+    match gpui::Rgba::try_from(s) {
+        Ok(rgba) => gpui::Hsla::from(rgba),
+        Err(_) => gpui::black(),
+    }
+}
