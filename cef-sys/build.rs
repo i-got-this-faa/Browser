@@ -7,6 +7,13 @@
 
 use std::path::PathBuf;
 
+fn cef_root() -> PathBuf {
+    // vendored CEF distribution; override with STRIP_CEF_ROOT when relocating.
+    std::env::var("STRIP_CEF_ROOT")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../vendor/cef"))
+}
+
 fn main() {
     let root = cef_root();
     let root = root.canonicalize().unwrap_or(root);
