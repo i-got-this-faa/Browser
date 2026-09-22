@@ -10,3 +10,6 @@ ts	phase	decision	why	evidence	result
 2026-09-22T01:35+05:30	env	SYNC terminal commands kill background children on return; nohup/setsid do not survive	probe processes kept dying silently between commands; must run servers within one command or as BACKGROUND	probe7/probe8 logs empty	workflow constraint recorded
 2026-09-22T02:10+05:30	runtime	Lua boundary = context snapshot in, Requests out; no pending-call ids	single-threaded GPUI made call-id plumbing dead weight; scripts read browser.tabs/active_page pushed before each hook/command call
 2026-09-22T02:10+05:30	layout	add_page focuses the new page (niri semantics)	fleet session-audit: prior fix changed focus path; tests assumed old behavior and caught it
+2026-09-23T00:30+05:30	frame	FROZEN: CDP screencast backend stays only as throwaway test-harness behind WebView trait; zero further investment	screencast path = PNG->base64->decode->RenderImage/frame + atlas tile churn; DoD forbids encode/decode in frame path
+webview-cdp/src/lib.rs Page.startScreencast; browser-ui main.rs drain_engine_events -> frame_png -> decode_png_bgra
+open

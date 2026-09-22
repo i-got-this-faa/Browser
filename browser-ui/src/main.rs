@@ -140,6 +140,24 @@ impl Surface {
 
     /// Frozen CDP-harness path: decode a PNG frame into the stable buffer.
     /// Only reachable with STRIP_ENGINE=cdp; never on the CEF frame path.
+    fn patch_png(&mut self, png: &[u8]) {
+        if let Some(img) = decode_png_bgra(png) {
+            let (w, h) = img.dimensions();
+            self.width = w;
+            self.height = h;
+            self.bgra = img.into_raw();
+            self.version += 1;
+        }
+    }
+
+    /// Publish `bgra` as the GPUI texture `render` draws, if it changed since
+    /// the last upload. Returns None until the first frame arrives.
+    ///
+    /// gpui's sprite atlas keys tiles by `ImageId` and reads bytes only on
+    /// first insert (`get_or_insert_with`), so updated pixels require a NEW
+    /// RenderImage — reusing the old one would keep drawing stale tiles. The
+    /// superseded image is released from every window's atlas, else each
+    /// damage event would leak a full-page tile.
     fn texture(&mut self, cx: &mut Context<Shell>) -> Option<Arc<RenderImage>> {
 impl Focusable for Shell {
     fn focus_handle(&self, _: &gpui::App) -> FocusHandle {
