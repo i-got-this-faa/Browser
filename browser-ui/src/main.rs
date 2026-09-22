@@ -87,6 +87,15 @@ struct Shell {
 /// it through the shim buffer patch); `painted` is the GPUI texture derived
 /// from it. The texture is only recreated when `version` advances (damage or
 /// resize), and the atlas tile recycles via drop_image -> free_list.
+struct Surface {
+    bgra: Vec<u8>,
+    width: u32,
+    height: u32,
+    version: u64,
+    painted: Option<Arc<RenderImage>>,
+    painted_version: u64,
+}
+
 impl Surface {
     fn new() -> Self {
         Self {

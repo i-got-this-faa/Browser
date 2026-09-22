@@ -22,3 +22,7 @@ open
 2026-09-23T00:45+05:30	env	all cargo builds capped at 8 jobs (nproc=12)	user: 'dont compile/build on all 12 threads, do on max 8'
 .cargo/config.toml [build] jobs=8
 open
+2026-09-23T00:50+05:30	texture	stable GPUI texture per page: RenderImage kept alive with damage-version tracking; drop_image(old)+insert on resize only; damage re-upload reuses same ImageId key
+gpui atlas keys tiles by RenderImageParams{image_id,frame}; AtlasTextureList has free_list so tiles recycle; drop_image removes key
+registry gpui-0.2.2/src/assets.rs, platform.rs:762-830, window.rs:3129 paint_image / drop_image
+open
