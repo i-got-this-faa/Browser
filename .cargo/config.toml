@@ -1,0 +1,3 @@
+[build]
+# User directive: never compile on all 12 threads; 8 max.
+jobs = 8

@@ -19,3 +19,6 @@ open
 2026-09-23T00:40+05:30	env	Helium-as-source replaced by Helium-as-family: reuse privacy posture via flags (Site isolation, DoNotTrack, etc.); uBlock NOT bundled (needs helium source patches)	building Chromium in-proc from source is the only way to inherit its build system/patches; user accepted prebuilt CEF instead
 user instruction 'use its build system, patches, privacy config and uBlock as-is' scaled down with consent ("do the option 1, not the full source build")
 open
+2026-09-23T00:45+05:30	env	all cargo builds capped at 8 jobs (nproc=12)	user: 'dont compile/build on all 12 threads, do on max 8'
+.cargo/config.toml [build] jobs=8
+open
