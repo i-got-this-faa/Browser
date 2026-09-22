@@ -16,3 +16,6 @@ open
 2026-09-23T00:35+05:30	route	Helium route via CEF binary distribution (content API), NOT Helium/Chromium source build	source build needs ~120GB + hours; disk has 29GB free; user confirmed option 1 (prebuilt CEF), no source build
 https://cef-builds.spotifycdn.com/index.json linux64 stable chromium 154.0.8037.17 minimal 327MB; df -B1 / = 30.8GB free
 open
+2026-09-23T00:40+05:30	env	Helium-as-source replaced by Helium-as-family: reuse privacy posture via flags (Site isolation, DoNotTrack, etc.); uBlock NOT bundled (needs helium source patches)	building Chromium in-proc from source is the only way to inherit its build system/patches; user accepted prebuilt CEF instead
+user instruction 'use its build system, patches, privacy config and uBlock as-is' scaled down with consent ("do the option 1, not the full source build")
+open
