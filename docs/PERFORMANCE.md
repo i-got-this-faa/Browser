@@ -63,16 +63,59 @@ Burst (2 new pages, focus flips, overview toggles, 12s):
 | frame p95 | 255us | 253us |
 
 Remaining costs are legitimate work: paints land at 300-800us per page-frame
-and only when content actually changed. The 60Hz pump keeps draining engine
-events cheaply (46-90us per tick) so input latency is unaffected.
+and only when content actually changed.
+
+## Round 2: the event-driven pump (2026-09-24)
+
+The round-1 "Rejected" entry said an event-driven pump would need fd-backed
+wakeups for every event source. That undercounted the sources: the frame
+sources are two threads (CEF sink, CDP reader) plus the watcher and control
+acceptor threads — none of which own an fd the UI executor can poll. A
+one-slot waker channel makes all of them wake the pump with one line each.
+
+**Implementation** (`browser-core/src/wakeslot.rs`):
+
+- `frame_wake()` — an `async_channel::bounded(1)` receiver the pump awaits.
+  Capacity 1 coalesces storms: an animated page painting 400x/s yields one
+  pump iteration per rendered frame.
+- `kick()` — non-blocking, callable from any thread, before or after the
+  pump first awaits. Producers: CEF frame sink, CDP screencast reader,
+  config-watcher callback (browser-config), control-socket acceptor, and
+  toast start (its countdown advances on pump ticks).
+- The pump races `timer(16ms)` against `frame_wake().recv()` — but the timer
+  is **60Hz only while `animation_deadline()` says animation is in flight**
+  (smooth scroll, toast countdown); otherwise it is a 1-hour watchdog that
+  exists so a lost kick can never wedge the pump.
+- Toasts became wall-clock (`toast_deadline`) instead of frame-counted —
+  frame counting would freeze the countdown on an idle shell.
+- Control socket: the acceptor thread now reads the request line (500ms
+  timeout) and hands `(stream, line)` to the UI thread over a channel, then
+  kicks. The UI thread does zero network reads and zero accepts.
+
+**Measured** (same methodology, real CEF engine):
+
+| metric | 16ms timer pump | event-driven pump |
+|---|---|---|
+| idle CPU (main proc, 12s window, /proc schedstat) | wake loop ~60Hz + renders | **0.405% of one core** |
+| timer-driven frames while idle | 60/s (pre-round-1), 3.2/s (round 1) | **0** — all remaining frames are CEF OnPaint for the visible page (~1/s damage + ~1/s empty-damage), the content engine's own floor |
+| control-socket reply latency during silent client | 213ms (waited on a 500ms read) | **3ms** |
+| hot reload / nofreeze / agent API suites | pass | pass |
+
+The remaining 2 fps worth of `frame` spans in a steady-state trace are CEF
+OnPaint events with (often empty) damage — the engine's repaint cadence for
+a visible page, not shell work. Suppressing those would mean suppressing
+page redraws. Idle texture upload still happens for those paints
+(~1.8MB/10s for one 958x1050 page); a version-diff on the composited buffer
+could skip the empty-damage uploads if that ever matters.
 
 ## Rejected / not-worth-it
 
 - Layout math is not a bottleneck: geometry+visible is 50ns (1 page) to
   1.5us (256 pages); snapshot build 36ns-7us. No change needed.
-- The 16ms timer stays: it is the input/event pump. Making it event-driven
-  would need an fd-backed wakeup for every engine event source; the dirty
-  flag already removed the render cost.
+- The 16ms timer is gone (round 2 replaced it); the round-1 note is kept
+  for the record: an event-driven pump "would need an fd-backed wakeup for
+  every engine event source" — it needed a waker in each *source thread*,
+  not an fd per source, which is exactly what `wakeslot::kick` provides.
 - CDP PNG path (`STRIP_ENGINE=cdp`) is the frozen test harness (decisions.tsv
   frame/frozen): encode/decode stays, do not invest.
 
@@ -83,6 +126,11 @@ bash scripts/trace_session.sh /tmp/t.jsonl idle25   # or navigate / burst / veri
 python3 scripts/trace_report.py /tmp/t.jsonl
 bash scripts/verify_hotreload.sh
 bash scripts/verify_nofreeze.sh
+bash scripts/verify_agent_api.sh
 cargo bench -p browser-ui --bench layout_bench
 cargo test --workspace
 ```
+
+See also `docs/AGENT_API.md`: the agent control surface that rides on the
+same event-driven socket (every command kicks the pump, so replies are
+computed immediately on an idle shell).

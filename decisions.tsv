@@ -67,3 +67,4 @@ fixed
 watcher was a Shell::new local: dropped on return -> hot reload silently dead after startup; silent socket client blocked the frame pump indefinitely (blocking read_line on UI thread)
 scripts/verify_hotreload.sh PASS (0.78->0.55 applied live); scripts/verify_nofreeze.sh PASS (8ms state reply during silent client)
 fixed
+2026-09-24T00:24+0530	shell	event-driven frame pump: pump awaits browser-core::wakeslot (async-channel, cap-1 coalescing) kicked by CEF sink/CDP reader/config watcher/control acceptor; 60Hz timer only while animating; toast ttl frame-counted -> wall-clock; control reads moved to acceptor thread + channel to UI	idle burned CPU on 60Hz wake loop; every network read sat on the UI thread	/proc schedstat 0.405% idle CPU; zero timer frames; nofreeze 213ms->3ms; hotreload+agent 23/23 PASS	fixed
