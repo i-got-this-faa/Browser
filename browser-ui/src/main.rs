@@ -766,6 +766,33 @@ impl Shell {
 
     /// Replace the prompt's contents (control-socket path). Typing into a
     /// fresh address bar replaces its prefill, so the socket does too.
+    pub fn set_prompt_text(&mut self, text: &str, cx: &mut Context<Self>) {
+        if let Overlay::Prompt { text: slot, fresh, .. } = &mut self.overlay {
+            *slot = text.to_string();
+            *fresh = false;
+        }
+        cx.notify();
+    }
+
+    /// Synthesize a keystroke through the same routing as real keys.
+    pub fn synthesize_key(&mut self, binding: &str, cx: &mut Context<Self>) {
+        let ks = parse_binding(binding);
+        self.route_key(&ks, cx);
+    }
+
+    /// Overlay kind, for control-socket state reporting.
+    pub fn overlay_kind(&self) -> &'static str {
+        match &self.overlay {
+            Overlay::None => "none",
+            Overlay::Prompt { .. } => "prompt",
+            Overlay::Palette { .. } => "palette",
+            Overlay::Toast { .. } => "toast",
+        }
+    }
+
+    // -- palette ------------------------------------------------------------
+
+    /// Palette key handling, split out so the overlay borrow ends first.
     fn handle_palette_key(
         &mut self,
         binding: &str,

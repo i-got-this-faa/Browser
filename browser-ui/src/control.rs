@@ -108,6 +108,27 @@ pub fn exec_line(shell: &mut Shell, line: &str, cx: &mut gpui::Context<Shell>) -
             // argument (typing replaces a selected prefill in a real bar),
             // submit — the real UX path.
             shell.run_typed_command("focus.url", cx);
+            shell.set_prompt_text(&arg, cx);
+            shell.submit_prompt_text(cx);
+            ok("prompt submitted")
+        }
+        "key" => {
+            if arg.is_empty() {
+                return err("key needs arg");
+            }
+            shell.synthesize_key(arg, cx);
+            ok(&format!("key {arg}"))
+        }
+        "quit" => {
+            shell.engine.shutdown();
+            cx.quit();
+            ok("bye")
+        }
+        _ => err(&format!("unknown cmd {cmd:?}")),
+    }
+}
+
+/// Full state snapshot as JSON: pages, active, workspace, scroll, overlays.
 pub fn state_json(shell: &Shell) -> String {
     let active = shell.state.active_id();
     let pages: Vec<Value> = shell
