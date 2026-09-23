@@ -1079,6 +1079,21 @@ impl Shell {
                     .on_mouse_down(
                         MouseButton::Left,
                         cx.listener(move |this, _ev, _win, cx| {
+                            this.focus_page(tab, cx);
+                        }),
+                    )
+                    .on_mouse_down(
+                        MouseButton::Middle,
+                        cx.listener(move |this, _ev, _win, cx| {
+                            this.focus_page(tab, cx);
+                            this.dispatch(Request::PageClose, cx);
+                        }),
+                    ),
+            );
+        }
+        bar
+    }
+
     fn render_status_bar(
         &self,
         bar_bg: gpui::Hsla,
