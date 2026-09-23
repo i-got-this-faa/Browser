@@ -79,6 +79,11 @@ enum Overlay {
     Prompt { text: String, fresh: bool },
     /// Command palette with filter text and a highlighted row (moved by
     /// arrows / scroll wheel).
+    Palette { text: String, selected: usize },
+    /// Transient message shown near the status bar.
+    Toast { text: String, ttl_frames: u16 },
+}
+
 // ---------------------------------------------------------------------------
 // Shell
 // ---------------------------------------------------------------------------
@@ -486,6 +491,10 @@ impl Shell {
             self.overlay = Overlay::Prompt { text: prefill, fresh: true };
         }
         if fx.palette_open {
+            self.overlay = Overlay::Palette { text: String::new(), selected: 0 };
+        }
+        self.effects(&mut fx);
+        if fx.quit {
             // Palette/Lua `app.quit`: ops set Effects::quit; nothing read it
             // before, so the command silently did nothing.
             self.engine.shutdown();
@@ -802,6 +811,51 @@ impl Shell {
     ) {
         let matches = self.palette_matches(filter);
         let sel = match &self.overlay {
+            Overlay::Palette { selected, .. } => *selected,
+            _ => 0,
+        };
+        let pick = matches
+            .get(sel.min(matches.len().saturating_sub(1)))
+            .map(|(name, _)| name.clone());
+        match binding {
+            "escape" => self.overlay = Overlay::None,
+            "enter" => {
+                self.overlay = Overlay::None;
+                if let Some(name) = pick {
+                    self.run_typed_command(&name, cx);
+                }
+            }
+            // Selection moves with arrows (and the scroll wheel, wired in
+            // render_palette) instead of falling through to `_` = do nothing.
+            "up" | "pageup" => self.palette_move(-1),
+            "down" | "pagedown" => self.palette_move(1),
+            "backspace" => {
+                if let Overlay::Palette { text, selected, .. } = &mut self.overlay {
+                    text.pop();
+                    *selected = 0;
+                }
+            }
+            "tab" => {
+                if let Some(name) = pick {
+                    if let Overlay::Palette { text, selected, .. } = &mut self.overlay {
+                        *text = name;
+                        *selected = 0;
+                    }
+                }
+            }
+            _ => {
+                if ks.modifiers == gpui::Modifiers::none() {
+                    if let Some(c) = &ks.key_char {
+                        if let Overlay::Palette { text, selected, .. } = &mut self.overlay {
+                            text.push_str(c);
+                            *selected = 0;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     /// Move the palette selection by `delta`, clamped to the rows actually
     /// rendered (the visible list is capped at PALETTE_VISIBLE).
     fn palette_move(&mut self, delta: i32) {
@@ -813,6 +867,34 @@ impl Shell {
         if n == 0 {
             return;
         }
+        if let Overlay::Palette { selected, .. } = &mut self.overlay {
+            *selected = (*selected as i32 + delta).clamp(0, n as i32 - 1) as usize;
+        }
+    }
+
+    fn palette_matches(&self, filter: &str) -> Vec<(String, String)> {
+        self.palette_matches_for(filter)
+    }
+
+    fn palette_matches_for(&self, filter: &str) -> Vec<(String, String)> {
+        let f = filter.to_lowercase();
+        let mut out: Vec<(String, String)> = Request::all_commands()
+            .iter()
+            .map(|(n, d)| (n.to_string(), d.to_string()))
+            .filter(|(n, _)| f.is_empty() || n.contains(&f))
+            .collect();
+        if let Some(host) = &self.lua {
+            for (name, desc) in host.command_names() {
+                if f.is_empty() || name.contains(&f) {
+                    out.push((name.clone(), desc.clone()));
+                }
+            }
+        }
+        out
+    }
+
+    // -- chrome / viewport inset --------------------------------------------
+
     /// Window-space y of the inner viewport's top edge: the page bar height
     /// when the bar is shown, else 0. Layout runs in inner coordinates and
     /// drawing/hit-testing translate through this.
@@ -1111,6 +1193,28 @@ impl Render for Shell {
             Overlay::Prompt { text, .. } => {
                 root = root.child(self.render_prompt(text.clone(), bar_bg, bar_text, accent));
             }
+            Overlay::Palette { text, selected } => {
+                let matches = self.palette_matches(text);
+                root = root.child(self.render_palette(
+                    text.clone(),
+                    matches,
+                    *selected,
+                    bar_bg,
+                    bar_text,
+                    accent,
+                    cx,
+                ));
+            }
+            Overlay::Toast { text, .. } => {
+                root = root.child(
+                    div()
+                        .absolute()
+                        .bottom(px(40.0))
+                        .left(px(16.0))
+                        .px_3()
+                        .py_1()
+                        .rounded_sm()
+                        .bg(bar_bg)
                         .block_mouse_except_scroll()
                         .text_size(px(12.0))
                         .text_color(bar_text)
