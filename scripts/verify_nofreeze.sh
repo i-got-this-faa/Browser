@@ -10,9 +10,16 @@ sleep 1
 
 env STRIP_TRACE=/tmp/trace-freeze.jsonl "$ROOT/target/debug/browser" >/tmp/freeze.log 2>&1 &
 PID=$!
-for i in $(seq 1 100); do [ -S "$SOCK" ] && break; sleep 0.2; done
-[ -S "$SOCK" ] || { echo "FAIL: no socket"; exit 1; }
-sleep 3
+# Wait until a state query is actually ANSWERED (the socket file can linger
+# from a just-killed instance while the new browser starts CEF).
+ready=""
+for i in $(seq 1 100); do
+  r=$(printf '{"cmd":"state"}\n' | timeout 1 nc -U "$SOCK" 2>/dev/null)
+  if echo "$r" | grep -q '"ok":true'; then ready=1; break; fi
+  sleep 0.2
+done
+[ -n "$ready" ] || { echo "FAIL: browser never answered"; exit 1; }
+sleep 1
 
 # Silent client: holds the connection open without sending a line.
 python3 - "$SOCK" <<'PYEOF' &

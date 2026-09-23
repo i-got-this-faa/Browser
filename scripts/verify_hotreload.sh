@@ -12,11 +12,19 @@ sleep 1
 env STRIP_TRACE=/tmp/trace-hr2.jsonl "$ROOT/target/debug/browser" >/tmp/hr2.log 2>&1 &
 PID=$!
 
-for i in $(seq 1 100); do [ -S "$SOCK" ] && break; sleep 0.2; done
-[ -S "$SOCK" ] || { echo "FAIL: no socket"; tail -5 /tmp/hr2.log; exit 1; }
-sleep 3
-
 ctl() { printf '%s\n' "$1" | timeout 5 nc -U "$SOCK"; }
+
+# Wait until a state query is actually ANSWERED: the socket file can linger
+# from a just-killed instance (ECONNREFUSED) while the new browser is still
+# starting CEF.
+ready=""
+for i in $(seq 1 100); do
+  r=$(ctl '{"cmd":"state"}' 2>/dev/null)
+  if echo "$r" | grep -q '"ok":true'; then ready=1; break; fi
+  sleep 0.2
+done
+[ -n "$ready" ] || { echo "FAIL: browser never answered"; tail -5 /tmp/hr2.log; exit 1; }
+sleep 1
 
 before=$(ctl '{"cmd":"state"}' | python3 -c "import json,sys; print(json.load(sys.stdin)['page_fraction'])")
 echo "before edit: page_fraction=$before"
