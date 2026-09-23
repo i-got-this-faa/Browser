@@ -146,7 +146,9 @@ fn answer(
     Ok(())
 }
 
-/// Handle one request. Public so tests can drive a Shell without a socket.
+/// Handle one request. Native control commands stay stable; everything the
+/// agent surface serves routes through `agent::handle` (which also owns the
+/// help text). `exec_line` stays public so tests can drive a Shell.
 pub fn exec_line(shell: &mut Shell, line: &str, cx: &mut gpui::Context<Shell>) -> String {
     let req: Value = match serde_json::from_str(line) {
         Ok(v) => v,
@@ -185,8 +187,12 @@ pub fn exec_line(shell: &mut Shell, line: &str, cx: &mut gpui::Context<Shell>) -
             cx.quit();
             ok("bye")
         }
-        "kick" => ok("kicked"),
-        _ => err(&format!("unknown cmd {cmd:?}")),
+        _ => {
+            // Agent surface (help, get_state, click, type, screenshot, ...).
+            // Unknown commands fall out of agent::handle as an error reply.
+            crate::agent::handle(shell, cmd, arg, cx)
+                .unwrap_or_else(|| err(&format!("unknown cmd {cmd:?}")))
+        }
     }
 }
 

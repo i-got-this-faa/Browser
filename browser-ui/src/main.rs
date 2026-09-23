@@ -6,6 +6,7 @@
 //!
 //! The Chromium engine runs headless; this GPUI window is the browser.
 
+mod agent;
 mod control;
 mod engine;
 mod trace;
@@ -438,6 +439,18 @@ impl Shell {
         // The countdown advances on pump ticks; kick so idle shells animate
         // the toast away on time.
         browser_core::wakeslot::kick();
+    }
+
+    /// The built-in (and Lua) command table for the agent `help` surface.
+    pub fn typed_command_list(&self) -> Vec<(String, String)> {
+        let mut out: Vec<(String, String)> = browser_runtime::Request::all_commands()
+            .iter()
+            .map(|(n, d)| (n.to_string(), d.to_string()))
+            .collect();
+        if let Some(host) = &self.lua {
+            out.extend(host.command_names());
+        }
+        out
     }
 
     // -- dispatch -----------------------------------------------------------
