@@ -13,13 +13,21 @@
 //!   {"cmd":"quit"}                                 -> close the browser
 //!
 //! Example: `echo '{"cmd":"exec","arg":"page.new"}' | nc -U /tmp/strip-browser.sock`
+//!
+//! Wiring: an acceptor thread accepts connections and sends the streams to the
+//! UI thread over a channel, then kicks the frame pump. The pump drains the
+//! channel and answers each client inline. This replaced two failed shapes:
+//! a per-frame nonblocking `accept` (a syscall per pump iteration, and the
+//! reason a silent client could stall the pump) and a blocking read on the UI
+//! thread (audit #9). The read timeout stays: a client that connects without
+//! sending must not hold the UI thread either.
 
 use crate::Shell;
 use serde_json::{json, Value};
 use std::io::{BufRead, BufReader, Write};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::mpsc::{self, Receiver, TryRecvError};
 
 /// Socket path used by scripts and tests. `STRIP_BROWSER_SOCK` overrides,
 /// then `$XDG_RUNTIME_DIR/strip-browser.sock`, then `/tmp/strip-browser.sock`.
@@ -36,50 +44,103 @@ pub fn socket_path() -> PathBuf {
     PathBuf::from("/tmp/strip-browser.sock")
 }
 
-/// Begin listening (nonblocking). Call once at startup. The shell holds the
-/// listener in an `Arc` so the per-frame poll can share it without a dup().
-pub fn start() -> Option<Arc<UnixListener>> {
+/// Accepted client with its request line, en route to the UI thread.
+type Pending = (UnixStream, String);
+
+/// Listener handle kept alive by the shell: holds the acceptor thread so
+/// dropping it shuts the acceptor down and unlinks the socket path.
+pub struct ControlListener {
+    _acceptor: std::thread::JoinHandle<()>,
+    rx: Receiver<Pending>,
+}
+
+impl Drop for ControlListener {
+    fn drop(&mut self) {
+        // Unlink before the acceptor's listener closes, so a replacement
+        // instance can bind the same path without racing our stale socket.
+        let _ = std::fs::remove_file(socket_path());
+    }
+}
+
+/// Spawn the acceptor thread. The shell stores the returned handle; the pump
+/// drains [`ControlListener::rx`] and serves clients inline on the UI thread.
+pub fn start() -> Option<ControlListener> {
     let path = socket_path();
     let _ = std::fs::remove_file(&path);
     let listener = UnixListener::bind(&path).ok()?;
-    listener
-        .set_nonblocking(true)
-        .expect("control socket nonblocking");
     eprintln!("control socket: {}", path.display());
-    Some(Arc::new(listener))
+    let (tx, rx) = mpsc::channel::<Pending>();
+    let acceptor = std::thread::Builder::new()
+        .name("control-acceptor".into())
+        .spawn(move || {
+            for stream in listener.incoming() {
+                match stream {
+                    Ok(s) => {
+                        // Read happens HERE, not on the UI thread: a client
+                        // that connects and stalls (or sends slowly) blocks
+                        // this thread for at most the read timeout, never
+                        // the frame pump. Nothing enters the channel until
+                        // a full request line is available.
+                        let req = read_request(&s);
+                        let Some(line) = req else { continue };
+                        if tx.send((s, line)).is_err() {
+                            break; // UI thread gone
+                        }
+                        // The pump may be parked awaiting wakes; nudge it to
+                        // come answer this client. Without this, a reply
+                        // waits for the next unrelated event (measured 213ms
+                        // latency before the fix).
+                        browser_core::wakeslot::kick();
+                    }
+                    Err(_) => break,
+                }
+            }
+        })
+        .ok()?;
+    Some(ControlListener { _acceptor: acceptor, rx })
 }
 
-/// Poll the listener once per frame. Accepts every pending connection and
-/// answers it synchronously (clients send one request and wait for the reply).
-pub fn poll(shell: &mut Shell, listener: &UnixListener, cx: &mut gpui::Context<Shell>) {
-    loop {
-        match listener.accept() {
-            Ok((stream, _)) => {
-                let _ = serve(stream, shell, cx);
+impl ControlListener {
+    /// Take every already-accepted client (with its already-read request
+    /// line) and answer each inline on the UI thread. The acceptor thread
+    /// did all the waiting, so this is pure computation + one write.
+    pub fn drain(&mut self, shell: &mut Shell, cx: &mut gpui::Context<Shell>) {
+        loop {
+            match self.rx.try_recv() {
+                Ok((stream, line)) => {
+                    let _ = answer(stream, &line, shell, cx);
+                }
+                Err(TryRecvError::Empty) => break,
+                Err(TryRecvError::Disconnected) => break,
             }
-            Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => break,
-            Err(_) => break,
         }
     }
 }
 
+/// Blocking read of one request line, for the ACCEPTOR thread only. A
+/// silent or stalled client simply never produces a line and is dropped
+/// after the timeout.
+fn read_request(stream: &UnixStream) -> Option<String> {
+    stream
+        .set_read_timeout(Some(std::time::Duration::from_millis(500)))
+        .ok()?;
+    let mut reader = BufReader::new(stream.try_clone().ok()?);
+    let mut line = String::new();
+    match reader.read_line(&mut line) {
+        Ok(0) | Err(_) => None,
+        Ok(_) => Some(line),
+    }
+}
 
-
-fn serve(
-    stream: UnixStream,
+/// Execute one already-read request and write the reply. Runs on the UI
+/// thread; no network reads happen here.
+fn answer(
+    mut stream: UnixStream,
+    line: &str,
     shell: &mut Shell,
     cx: &mut gpui::Context<Shell>,
 ) -> std::io::Result<()> {
-    // Read timeout: a client that connects without sending must not block
-    // the UI thread (the frame pump answers this socket synchronously).
-    stream.set_read_timeout(Some(std::time::Duration::from_millis(500)))?;
-    let mut reader = BufReader::new(stream.try_clone()?);
-    let mut line = String::new();
-    if reader.read_line(&mut line)? == 0 {
-        return Ok(());
-    }
     let reply = exec_line(shell, line.trim(), cx);
-    let mut stream = stream;
     stream.write_all(reply.as_bytes())?;
     stream.write_all(b"\n")?;
     Ok(())
@@ -124,6 +185,7 @@ pub fn exec_line(shell: &mut Shell, line: &str, cx: &mut gpui::Context<Shell>) -
             cx.quit();
             ok("bye")
         }
+        "kick" => ok("kicked"),
         _ => err(&format!("unknown cmd {cmd:?}")),
     }
 }
@@ -150,7 +212,7 @@ pub fn state_json(shell: &Shell) -> String {
         "ok": true,
         "active": active,
         "active_workspace": shell.state.strip.active_workspace,
-        "scroll": shell.state.scroll,
+        "scroll": shell.state.scroll as f64,
         "page_fraction": shell.state.strip.page_fraction,
         "overlay": shell.overlay_kind(),
         "pages": pages,
@@ -164,4 +226,20 @@ fn ok(msg: &str) -> String {
 
 fn err(msg: &str) -> String {
     json!({ "ok": false, "error": msg }).to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn reply_json_shape_is_stable() {
+        // Scripts parse these; keep the envelope pinned.
+        let v: Value = serde_json::from_str(&ok("kicked")).unwrap();
+        assert_eq!(v["ok"], json!(true));
+        assert_eq!(v["msg"], json!("kicked"));
+        let e: Value = serde_json::from_str(&err("boom")).unwrap();
+        assert_eq!(e["ok"], json!(false));
+        assert_eq!(e["error"], json!("boom"));
+    }
 }
