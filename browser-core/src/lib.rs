@@ -3,6 +3,7 @@
 use serde::{Deserialize, Serialize};
 
 pub mod perf;
+pub mod wakeslot;
 
 pub type PageId = u64;
 pub type WorkspaceId = u64;
