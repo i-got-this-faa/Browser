@@ -283,6 +283,9 @@ extern "C" fn sink(ev: *const ffi::CefEvent, _ud: *mut c_void) {
                     height: ev.h as u32,
                 });
             }
+            // Event-driven pump: wake the UI exactly once per wake cycle
+            // (bounded channel coalesces an animated page's damage storm).
+            browser_core::wakeslot::kick();
         }
         ffi::CEF_EV_TITLE => {
             if let Some(tx) = entry.tx.as_ref() {
