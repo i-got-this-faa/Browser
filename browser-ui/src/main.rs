@@ -204,6 +204,39 @@ impl Surface {
     /// superseded image is released from every window's atlas, else each
     /// damage event would leak a full-page tile.
     fn texture(&mut self, cx: &mut Context<Shell>) -> Option<Arc<RenderImage>> {
+        if self.painted.is_some() && self.painted_version == self.version {
+            return self.painted.clone();
+        }
+        if self.width == 0 || self.height == 0 || self.bgra.is_empty() {
+            return None;
+        }
+        // Buffer is BGRA (CEF's format; patch_png swaps too) — gpui wants BGRA.
+        // Take ownership instead of cloning: the previous clone copied the
+        // full ~4MB frame per upload (230MB copied in 26s idle in the audit).
+        // The surface gets a fresh lazily-zeroed allocation for the next
+        // damage round; size is unchanged so patch_raw keeps fast-pathing.
+        let __t0 = std::time::Instant::now();
+        let bytes = self.bgra.len();
+        let taken = std::mem::take(&mut self.bgra);
+        let frame = match image::RgbaImage::from_raw(self.width, self.height, taken) {
+            Some(f) => f,
+            None => {
+                // Dimensions don't match the buffer (should be impossible:
+                // patch_raw/patch_png keep len == w*h*4). Reset fully so the
+                // next patch_raw reallocates instead of slicing a short buf.
+                self.width = 0;
+                self.height = 0;
+                self.bgra = Vec::new();
+                return None;
+            }
+        };
+        self.bgra = vec![0u8; bytes];
+        perf_event!("surface.texture_upload",
+            "bytes" => bytes,
+            "us" => __t0.elapsed().as_micros() as u64);
+        let next = Arc::new(RenderImage::new(smallvec::smallvec![image::Frame::new(
+            frame,
+        )]));
 impl Focusable for Shell {
     fn focus_handle(&self, _: &gpui::App) -> FocusHandle {
         self.focus.clone()
