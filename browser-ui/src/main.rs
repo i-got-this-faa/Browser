@@ -237,6 +237,15 @@ impl Surface {
         let next = Arc::new(RenderImage::new(smallvec::smallvec![image::Frame::new(
             frame,
         )]));
+        let old = self.painted.replace(Arc::clone(&next));
+        self.painted_version = self.version;
+        if let Some(old) = old {
+            cx.drop_image(old, None);
+        }
+        Some(next)
+    }
+}
+
 impl Focusable for Shell {
     fn focus_handle(&self, _: &gpui::App) -> FocusHandle {
         self.focus.clone()
