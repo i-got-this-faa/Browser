@@ -486,6 +486,21 @@ impl Shell {
             self.overlay = Overlay::Prompt { text: prefill, fresh: true };
         }
         if fx.palette_open {
+            // Palette/Lua `app.quit`: ops set Effects::quit; nothing read it
+            // before, so the command silently did nothing.
+            self.engine.shutdown();
+            cx.quit();
+            return;
+        }
+        // Retarget the smooth scroll only for commands that actually move
+        // focus/workspaces; per-frame pokes (toast, prompt, palette) must not
+        // re-center the strip (perf audit: every dispatch reset scroll).
+        if fx.scroll_recenter {
+            self.scroll_target = Some(browser_layout::scroll_to_active(&self.state.strip, &vp));
+        }
+        cx.notify();
+    }
+
     // -- prompt -------------------------------------------------------------
 
     fn submit_prompt(&mut self, text: String, cx: &mut Context<Self>) {
