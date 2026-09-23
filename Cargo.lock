@@ -667,6 +667,7 @@ dependencies = [
 name = "browser-core"
 version = "0.1.0"
 dependencies = [
+ "async-channel 1.9.0",
  "serde",
  "tracing",
 ]
@@ -702,6 +703,7 @@ dependencies = [
  "browser-core",
  "browser-layout",
  "browser-runtime",
+ "futures-lite 2.6.1",
  "gpui",
  "image",
  "serde",
@@ -6417,6 +6419,7 @@ name = "webview-cef"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "browser-core",
  "cef-sys",
  "webview-cdp",
 ]
