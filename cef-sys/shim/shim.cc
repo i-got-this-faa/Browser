@@ -406,6 +406,15 @@ int cef_early_process(int argc, char** argv) {
   // Heap-allocated: CefExecuteProcess drops the last ref on return, which
   // runs `delete this` (IMPLEMENT_REFCOUNTING). A `static` StripApp would be
   // freed as if it were heap memory -> free(): invalid size.
+  CefRefPtr<StripApp> app = new StripApp();
+  return CefExecuteProcess(args, app, nullptr);
+}
+
+void cef_set_sink(cef_sink_fn fn, void* ud) {
+  g_sink_ud.store(ud, std::memory_order_relaxed);
+  g_sink.store(fn, std::memory_order_release);
+}
+
 int cef_engine_start(const char* subprocess, const char* resources,
                      const char* locales, const char* cache) {
   bool expected = false;
