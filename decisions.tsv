@@ -39,3 +39,31 @@ open
 2026-09-23T20:20	shell	status bar removed via config show_status_bar=false in ~/.config/strip-browser/browser.lua (chrome_bottom follows the flag)	user: bottom bar with [main]+url is slop, do not need this line	user request + earlier purpose question about the bar	removed
 2026-09-23T20:20	shell	palette selection: Overlay::Palette{selected}, up/down/pageup/pagedown + scroll wheel move it, enter/tab act on it, occlude() so wheel does not scroll page behind	arrows hit the '_' arm (key_char None = no-op) and wheel fell through to the page: menu could not be navigated except by typing	handle_palette_key had no up/down arms; render_palette used block_mouse_except_scroll (wheel passes behind) and always highlighted i==0	fixed
 2026-09-23T20:21	shell	floating per-frame title chip at (8,8) removed (loading placeholder kept)	user: 'slop titles on top of the pages hovering' - chip duplicated tab-bar titles over page content	render() line 1074-1086 appended an absolute title div to every frame	removed
+2026-09-23T22:41	perf	trace-audit harness: STRIP_TRACE=<file> enables JsonlLayer (tracing-subscriber registry, perf target only) + perf_event!/perf_span! macros + scripts/trace_session.sh + scripts/trace_report.py aggregator
+no observability before: every claim about frame costs was guesswork; layer is zero-cost when STRIP_TRACE unset (disabled callsites)
+/tmp/trace-idle.jsonl baseline: 60.7 renders/s idle, drain_engine_events p95 1.25ms, 740MB buffer copies in 26s
+fixed
+2026-09-23T22:41	perf	resize dedupe via Shell.view_sizes + has_view guard: engine.resize only on rounded-size change
+render() called engine.resize for every page every render (dead view_sizes field existed unused): 1594 resize calls/26s idle, 89 during burst, empty pages retried forever (no view error)
+idle 1594->2, navigate 924->2, burst 89->4 resize calls; all remaining are genuine size changes
+fixed
+2026-09-23T22:41	perf	frame pump notifies only when dirty (events/scroll/toast-hide); texture publish moved from drain to render() per visible page
+frame() called cx.notify() unconditionally at 60Hz -> GPUI re-rendered forever; texture() cloned the full ~4MB bgra per damage event
+idle renders/26s 1594->82 (61fps->3.2fps); texture_upload 229MB->104MB idle (burst 197MB->40MB); frame.paint mean 1237us->295us
+fixed
+2026-09-23T22:41	perf	Surface::texture takes buffer ownership (mem::take) instead of clone; fresh zeroed alloc handed back for next damage round
+bgra.clone() copied the whole frame per upload even when damage touched a few rows
+232MB copied per 26s idle -> 105MB; slice-bounds hazard on from_raw failure closed by full reset
+fixed
+2026-09-23T22:41	perf	dispatch retargets smooth scroll only when Effects.scroll_recenter (focus/workspace/new/close/move ops)
+every dispatch (toast, prompt, palette open) reset scroll_target -> strip re-centered itself spuriously and re-rendered
+ops.rs marks recentering ops; prompt/toast/palette no longer move the strip
+fixed
+2026-09-23T22:41	perf	effects dedup + pump-only dirty tracking; per-frame control-poll clone replaced by Arc<UnixListener>
+dispatch called effects() twice (fx.spawn spawned two CEF views per page); per-frame try_clone was a dup() syscall at 60Hz
+burst: 2x spawn per page eliminated; no per-frame fd churn
+fixed
+2026-09-23T22:41	shell	config watcher handle stored on Shell (_watcher); control serve() gets 500ms read timeout
+watcher was a Shell::new local: dropped on return -> hot reload silently dead after startup; silent socket client blocked the frame pump indefinitely (blocking read_line on UI thread)
+scripts/verify_hotreload.sh PASS (0.78->0.55 applied live); scripts/verify_nofreeze.sh PASS (8ms state reply during silent client)
+fixed
