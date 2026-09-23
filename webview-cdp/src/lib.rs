@@ -83,7 +83,9 @@ impl KeyInput {
     }
 }
 
-fn key_translation(key: &str) -> (Option<String>, u32) {
+/// GPUI-style key name -> (text to insert, Windows vkey). Public so the
+/// agent API shares the exact translation the real keyboard path uses.
+pub fn key_translation(key: &str) -> (Option<String>, u32) {
     match key {
         "enter" => (Some("\r".into()), 13),
         "tab" => (Some("\t".into()), 9),
