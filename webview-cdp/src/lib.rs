@@ -336,6 +336,7 @@ impl CdpSession {
                                         {
                                             break;
                                         }
+                                        browser_core::wakeslot::kick();
                                     }
                                     // Ack so chrome keeps producing frames.
                                     let ack = json!({
@@ -353,6 +354,7 @@ impl CdpSession {
                                             let _ = event_tx
                                                 .0
                                                 .send(WebViewEvent::UrlChanged(u.to_string()));
+                                            browser_core::wakeslot::kick();
                                         }
                                     }
                                 }
@@ -360,6 +362,7 @@ impl CdpSession {
                                     if let Some(t) = v["params"]["title"].as_str() {
                                         let _ =
                                             event_tx.0.send(WebViewEvent::TitleChanged(t.to_string()));
+                                        browser_core::wakeslot::kick();
                                     }
                                 }
                                 _ => {}
@@ -374,6 +377,7 @@ impl CdpSession {
                                 | Some(std::io::ErrorKind::Interrupted) => continue,
                                 _ => {
                                     let _ = event_tx.0.send(WebViewEvent::Closed);
+                                    browser_core::wakeslot::kick();
                                     break;
                                 }
                             }
