@@ -91,6 +91,29 @@ impl EngineController {
             .map(PathBuf::from)
             .unwrap_or_else(|_| PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../vendor/cef"));
         let resources = root.join("Resources");
+        let locales = resources.join("locales");
+        if !resources.join("resources.pak").exists() {
+            return Err(anyhow!("missing {}", resources.display()));
+        }
+        let exe = std::env::current_exe()?;
+        let cache = std::env::temp_dir().join(format!("strip-browser-cef-{}", std::process::id()));
+
+        // Early child-process branch must have run in main(); start browser proc.
+        let _engine = webview_cef::CefEngine::start(
+            &exe.to_string_lossy(),
+            &resources.to_string_lossy(),
+            &locales.to_string_lossy(),
+            &cache.to_string_lossy(),
+        )?;
+        Ok(Self {
+            shared: Arc::new(Mutex::new(EngineShared::default())),
+            backend: Arc::new(AtomicU8::new(BACKEND_CEF)),
+            dead: Arc::new(AtomicBool::new(false)),
+            cdp_engine: None,
+            cdp_data_dir: None,
+        })
+    }
+
     fn spawn_cdp(max_retries: u32) -> Result<Self> {
         let chrome = webview_cdp::which_chrome().ok_or_else(|| {
             anyhow!("no Chromium engine found (tried google-chrome, chromium, chromium-browser)")
