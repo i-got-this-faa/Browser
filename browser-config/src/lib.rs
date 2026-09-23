@@ -340,6 +340,10 @@ pub fn watch_config(path: PathBuf, tx: Sender<()>) -> Result<RecommendedWatcher>
         if let Ok(ev) = res {
             if ev.kind.is_modify() || ev.kind.is_create() {
                 let _ = tx.send(());
+                // Wake the shell's event-driven frame pump directly: the UI
+                // may be fully idle (no timer running), and without this the
+                // edit would sit unseen until the next unrelated event.
+                browser_core::wakeslot::kick();
             }
         }
     })?;
