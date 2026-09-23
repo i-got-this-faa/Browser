@@ -28,3 +28,4 @@ registry gpui-0.2.2/src/assets.rs, platform.rs:762-830, window.rs:3129 paint_ima
 open
 2026-09-23T10:05	run	symlink icudtl.dat + *.pak + locales from vendor/cef/Resources into vendor/cef/Release	CEF resolves ICU/pak paths from DIR_MODULE (libcef.so dir), resources_dir_path is not consulted that early	strace openat Release/icudtl.dat = ENOENT then SIGTRAP icu_util.cc:237; resource_bundle.cc:1119 pak failures	fixed
 2026-09-23T10:07	run	shim cef_early_process: static StripApp -> heap-allocated CefRefPtr (new StripApp())	CefExecuteProcess drops the last ref -> delete this ran on a static object	gdb bt: cef_early_process -> ~StripApp -> free(): invalid size, SIGABRT	fixed
+2026-09-23T10:08	run	main() calls webview_cef::early_process_exit_code() before config write / GPUI start	CEF re-execs this binary for renderer/gpu/utility children; the branch existed but was referenced nowhere	grep -rn early_process_exit_code -> definition only, 0 call sites	fixed

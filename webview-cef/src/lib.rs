@@ -344,6 +344,27 @@ impl CefEngine {
 /// Early process check: if this invocation is a CEF child process
 /// (renderer/gpu/utility), the caller must exit with the returned code
 /// immediately instead of running the shell.
+pub fn early_process_exit_code() -> Option<i32> {
+    let argv: Vec<CString> = std::env::args_os()
+        .map(|a| {
+            CString::new(a.into_string().unwrap_or_default()).unwrap_or_default()
+        })
+        .collect();
+    let mut ptrs: Vec<*mut std::os::raw::c_char> =
+        argv.iter().map(|a| a.as_ptr() as *mut _).collect();
+    ptrs.push(std::ptr::null_mut());
+    let argc = ptrs.len() as c_int - 1;
+    // SAFETY: argv is a valid C argv-shaped array for the duration of the call.
+    let rc = unsafe { ffi::cef_early_process(argc, ptrs.as_mut_ptr()) };
+    (rc >= 0).then_some(rc)
+}
+
+static NEXT_ABI_ID: AtomicU64 = AtomicU64::new(1);
+fn next_abi_id() -> u64 {
+    NEXT_ABI_ID.fetch_add(1, Ordering::SeqCst)
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
 

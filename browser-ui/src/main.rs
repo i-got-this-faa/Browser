@@ -31,6 +31,42 @@ fn main() -> Result<()> {
     // CEF re-executes this binary for renderer/GPU/utility subprocesses.
     // They must run CefExecuteProcess and exit here, before the shell, config
     // writer, or GPUI ever start (rc >= 0 => we are a child process).
+    if let Some(code) = webview_cef::early_process_exit_code() {
+        std::process::exit(code);
+    }
+    trace::init_from_env();
+
+    let config_file = config_path();
+    if ensure_default_config(&config_file, DEFAULT_LUA).context("write default browser.lua")? {
+        eprintln!("created {}", config_file.display());
+    }
+
+    let engine = EngineController::spawn(3)?;
+
+    Application::new().run(move |cx: &mut App| {
+        cx.activate(true);
+
+        let bounds = Bounds {
+            origin: Point::new(px(0.), px(0.)),
+            size: size(px(1280.), px(800.)),
+        };
+        cx.open_window(
+            WindowOptions {
+                window_bounds: Some(WindowBounds::Windowed(bounds)),
+                titlebar: None,
+                focus: true,
+                app_id: Some("strip-browser".into()),
+                window_decorations: Some(gpui::WindowDecorations::Client),
+                ..Default::default()
+            },
+            |_, cx| cx.new(|cx| Shell::new(engine.clone(), cx)),
+        )
+        .unwrap();
+    });
+
+    Ok(())
+}
+
 // ---------------------------------------------------------------------------
 // Overlays
 // ---------------------------------------------------------------------------
