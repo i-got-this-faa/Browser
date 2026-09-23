@@ -1032,6 +1032,19 @@ impl Render for Shell {
             Overlay::Prompt { text, .. } => {
                 root = root.child(self.render_prompt(text.clone(), bar_bg, bar_text, accent));
             }
+                        .block_mouse_except_scroll()
+                        .text_size(px(12.0))
+                        .text_color(bar_text)
+                        .child(text.clone()),
+                );
+            }
+            Overlay::None => {}
+        }
+
+        root
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Sub-renderers
 // ---------------------------------------------------------------------------
@@ -1062,6 +1075,11 @@ impl Shell {
             // Full-height page frames lie *under* this bar (top = 0); without
             // this, a tab click also fires the frame's handler underneath and
             // the bubble phase wins, reverting the focus.
+            .block_mouse_except_scroll();
+        for p in self.state.strip.visible() {
+            let is_active = self.state.strip.active_page == Some(p.id);
+            let label: SharedString = if p.title.is_empty() {
+                if p.url.is_empty() { "new".into() } else { truncate(&p.url, 24).into() }
             } else {
                 truncate(&p.title, 24).into()
             };
@@ -1135,6 +1153,11 @@ impl Shell {
             .bg(bar_bg)
             .text_size(px(11.0))
             .text_color(bar_text)
+            .block_mouse_except_scroll()
+            .child(div().text_color(accent).child(ws))
+            .child(active_url)
+    }
+
     fn render_prompt(
         &self,
         text: String,
@@ -1156,6 +1179,13 @@ impl Shell {
                 .bg(bar_bg)
                 .border_1()
                 .border_color(accent)
+                .block_mouse_except_scroll()
+                .text_size(px(14.0))
+                .text_color(if text.is_empty() { bar_text } else { accent })
+                .child(shown),
+        )
+    }
+
     fn render_palette(
         &self,
         text: String,
