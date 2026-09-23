@@ -816,6 +816,42 @@ impl Shell {
     /// Window-space y of the inner viewport's top edge: the page bar height
     /// when the bar is shown, else 0. Layout runs in inner coordinates and
     /// drawing/hit-testing translate through this.
+    fn chrome_top(&self) -> f32 {
+        if self.config.behavior.show_page_bar { PAGE_BAR_H } else { 0.0 }
+    }
+
+    /// Space reserved at the bottom by the status bar (inner coords end here).
+    fn chrome_bottom(&self) -> f32 {
+        if self.config.behavior.show_status_bar { STATUS_BAR_H } else { 0.0 }
+    }
+
+    // -- mouse --------------------------------------------------------------
+
+    fn page_under(&self, pos: Point<Pixels>) -> Option<(u64, Point<Pixels>)> {
+        let scale = if self.state.overview_open { 0.55 } else { 1.0 };
+        let geos = frame_geometries_scaled(
+            &self.state.strip,
+            &self.viewport,
+            self.state.scroll,
+            self.state.strip.page_fraction,
+            scale,
+        );
+        for (id, g) in geos {
+            let x0 = g.rel_x;
+            let x1 = g.rel_x + g.width;
+            let y0 = g.top;
+            let y1 = g.top + g.height;
+            let px_x = f32::from(pos.x);
+            // Window y -> inner-viewport y (bars live above/below the inner box).
+            let px_y = f32::from(pos.y) - self.chrome_top();
+            if px_x >= x0 && px_x <= x1 && px_y >= y0 && px_y <= y1 {
+                let local = Point::new(px(px_x - x0), px(px_y - y0));
+                return Some((id, local));
+            }
+        }
+        None
+    }
+
     fn focus_page(&mut self, id: u64, cx: &mut Context<Self>) {
         if self.state.strip.active_page != Some(id) {
             self.state.focus_page(id, &self.viewport);
@@ -919,6 +955,34 @@ impl Render for Shell {
         let vs = window.viewport_size();
         let new_vp = Viewport {
             width: vs.width.into(),
+            height: (f32::from(vs.height) - self.chrome_top() - self.chrome_bottom()).max(1.0),
+        };
+        if (new_vp.width - self.viewport.width).abs() > f32::EPSILON
+            || (new_vp.height - self.viewport.height).abs() > f32::EPSILON
+        {
+            self.viewport = new_vp;
+            // Re-center the active page when the window resizes.
+            if let Some(active) = self.state.active_id() {
+                self.scroll_target =
+                    Some(browser_layout::scroll_to_page(&self.state.strip, &self.viewport, active));
+            }
+        }
+
+        // Overview: zoom the whole strip out around the center (niri-style).
+        // One geometry pass feeds both the webview resize check and the
+        // element tree (the two-pass version duplicated the math per frame).
+        let scale = if self.state.overview_open { 0.55 } else { 1.0 };
+        let __t_geo = std::time::Instant::now();
+        let geos = frame_geometries_scaled(
+            &self.state.strip,
+            &self.viewport,
+            self.state.scroll,
+            self.state.strip.page_fraction,
+            scale,
+        );
+        perf_event!("render.geos",
+            "pages" => geos.len(),
+            "us" => __t_geo.elapsed().as_micros() as u64);
 
         // Webview viewports must track their on-screen frame size so CDP
         // screenshots match what is displayed. Checked per render, but each
@@ -972,6 +1036,21 @@ impl Render for Shell {
             let mut frame = div()
                 .absolute()
                 .left(px(g.rel_x))
+                .top(px(g.top + self.chrome_top()))
+                .w(px(g.width))
+                .h(px(g.height))
+                .bg(bar_bg)
+                .border_1()
+                .border_color(if is_active { border_focus } else { border })
+                .overflow_hidden()
+                .on_mouse_down(MouseButton::Left, cx.listener(Self::on_mouse_down))
+                .on_mouse_down(MouseButton::Right, cx.listener(Self::on_mouse_down))
+                .on_mouse_down(MouseButton::Middle, cx.listener(Self::on_mouse_down))
+                .on_mouse_up(MouseButton::Left, cx.listener(Self::on_mouse_up))
+                .on_mouse_up(MouseButton::Right, cx.listener(Self::on_mouse_up))
+                .on_mouse_up(MouseButton::Middle, cx.listener(Self::on_mouse_up))
+                .on_mouse_move(cx.listener(Self::on_mouse_move))
+                .on_scroll_wheel(cx.listener(Self::on_scroll));
 
             // Engine frames live in `surfaces` (written by the event pump);
             // publish any newer buffer once per rendered frame here. Hidden
