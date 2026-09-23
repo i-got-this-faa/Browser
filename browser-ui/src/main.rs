@@ -81,7 +81,7 @@ enum Overlay {
     /// arrows / scroll wheel).
     Palette { text: String, selected: usize },
     /// Transient message shown near the status bar.
-    Toast { text: String, ttl_frames: u16 },
+    Toast { text: String },
 }
 
 // ---------------------------------------------------------------------------
@@ -107,14 +107,18 @@ struct Shell {
     focus: FocusHandle,
     reload_rx: std::sync::mpsc::Receiver<()>,
     /// Kept alive here: dropping the watcher unregisters the notify watch,
-    /// which silently killed config hot-reload after startup.
+    /// which silently killed config hot-reload after startup. Change events
+    /// also kick the frame pump, so edits apply even while fully idle.
     _watcher: Option<WatcherHandle>,
     /// Pending smooth-scroll target; None means settled.
     scroll_target: Option<f32>,
+    /// Wall-clock time the toast hides at (toast is time-based: the pump no
+    /// longer ticks a fixed 60Hz, so frame-counting would freeze mid-display).
+    toast_deadline: Option<std::time::Instant>,
     /// Scriptable control socket (automation + headless E2E). None if bind
-    /// failed. Arc-shared so the per-frame poll can clone the handle cheaply
-    /// (a per-frame try_clone was a dup() syscall at 60Hz — see perf audit).
-    control: Option<Arc<std::os::unix::net::UnixListener>>,
+    /// failed. The acceptor thread hands clients to the pump over a channel,
+    /// so the UI thread never calls accept() itself (audit #9 follow-up).
+    control: Option<control::ControlListener>,
     /// Stable render surfaces per page: one BGRA buffer + one RenderImage
     /// each, re-uploaded only on damage or resize (no per-frame allocation).
     surfaces: HashMap<u64, Surface>,
@@ -278,6 +282,7 @@ impl Shell {
             reload_rx,
             _watcher: watcher,
             scroll_target: None,
+            toast_deadline: None,
             control: control::start(),
             surfaces: HashMap::new(),
             view_sizes: HashMap::new(),
@@ -286,12 +291,23 @@ impl Shell {
         shell.reload_lua(cx);
         shell.ensure_first_page();
 
-        // Frame pump: a ~60Hz timer drives event draining, smooth scroll,
-        // and toast lifetime. Each tick notifies, which re-renders.
+        // Event-driven frame pump: awaits browser_core::wakeslot::frame_wake()
+        // instead of ticking a ~60Hz timer, so an idle shell runs zero pump
+        // iterations and burns no CPU. Producers (CEF sink, CDP reader,
+        // config watcher, control acceptor) kick the pump; GPUI notifies the
+        // window on state changes and repaints itself. A timer backs the
+        // pump only while animation is in flight (smooth scroll, toast).
         cx.spawn(async move |this, cx| loop {
-            cx.background_executor()
-                .timer(std::time::Duration::from_millis(16))
-                .await;
+            let animate = this.update(cx, |this, _| this.animation_deadline().is_some()).unwrap_or(false);
+            // 60Hz only while animation is in flight; otherwise a 1h timeout
+            // that exists purely so the race below can also be won by the
+            // wake channel (and so a lost kick can never wedge the pump).
+            let timer = cx.background_executor().timer(match animate {
+                true => std::time::Duration::from_millis(16),
+                false => std::time::Duration::from_secs(3600),
+            });
+            let wake = async { let _ = browser_core::wakeslot::frame_wake().recv().await; };
+            futures_lite::future::or(timer, wake).await;
             if this.update(cx, |this, cx| this.frame(cx)).is_err() {
                 break; // shell released: window closed
             }
@@ -416,7 +432,12 @@ impl Shell {
     }
 
     fn toast(&mut self, text: impl Into<String>) {
-        self.overlay = Overlay::Toast { text: text.into(), ttl_frames: 240 };
+        // 240 frames at 60Hz was ~4s; keep the same wall-clock duration.
+        self.overlay = Overlay::Toast { text: text.into() };
+        self.toast_deadline = Some(std::time::Instant::now() + std::time::Duration::from_millis(4000));
+        // The countdown advances on pump ticks; kick so idle shells animate
+        // the toast away on time.
+        browser_core::wakeslot::kick();
     }
 
     // -- dispatch -----------------------------------------------------------
@@ -568,9 +589,13 @@ impl Shell {
         if self.poll_config_reload(cx) {
             dirty = true;
         }
-        if let Some(listener) = self.control.clone() {
-            control::poll(self, &listener, cx);
+        // The acceptor thread queues clients; answer them here on the UI
+        // thread. take() sidesteps the double borrow of self.
+        let mut listener = self.control.take();
+        if let Some(l) = listener.as_mut() {
+            l.drain(self, cx);
         }
+        self.control = listener;
 
         if let Some(target) = self.scroll_target {
             let next = scroll_step(self.state.scroll, target, self.config.behavior.smooth_scroll);
@@ -581,18 +606,29 @@ impl Shell {
             dirty = true;
         }
 
-        if let Overlay::Toast { ttl_frames, .. } = &mut self.overlay {
-            *ttl_frames = ttl_frames.saturating_sub(1);
-            if *ttl_frames == 0 {
+        // Toast lifetime is wall-clock now: the pump only runs when kicked,
+        // so frame-counting would freeze the countdown while idle.
+        if let Overlay::Toast { .. } = &self.overlay {
+            if self.toast_deadline.map(|d| std::time::Instant::now() >= d).unwrap_or(true) {
                 self.overlay = Overlay::None;
-                // Only the hide needs a repaint; the countdown itself draws
-                // the identical frame 239 times otherwise.
+                self.toast_deadline = None;
                 dirty = true;
             }
         }
 
         if dirty {
             cx.notify();
+        }
+    }
+
+    /// When the next pump iteration must run for animation to look smooth:
+    /// while a smooth scroll is in flight, or while a toast is counting down.
+    /// None means fully idle — the pump then waits for the next kick.
+    fn animation_deadline(&self) -> Option<std::time::Instant> {
+        if self.scroll_target.is_some() || self.toast_deadline.is_some() {
+            Some(std::time::Instant::now())
+        } else {
+            None
         }
     }
 
