@@ -101,10 +101,9 @@ pub fn key_translation(key: &str) -> (Option<String>, u32) {
         "pageup" => (None, 33),
         "pagedown" => (None, 34),
         "space" => (Some(" ".into()), 32),
-        other if other.len() == 1 => (Some(other.to_string()), {
-            let c = other.chars().next().unwrap().to_ascii_uppercase() as u32;
-            c
-        }),
+        other if other.len() == 1 => {
+            (Some(other.to_string()), other.chars().next().unwrap().to_ascii_uppercase() as u32)
+        }
         _ => (None, 0),
     }
 }
@@ -116,6 +115,15 @@ pub enum WebViewEvent {
     TitleChanged(String),
     UrlChanged(String),
     Closed,
+    Dmabuf {
+        fd: i32,
+        width: u32,
+        height: u32,
+        stride: u32,
+        offset: u64,
+        modifier: u64,
+        format: u32,
+    },
 }
 
 /// Contract every web-content backend implements. The shell depends only on
@@ -771,56 +779,6 @@ impl WebView for CdpWebView {
 }
 
 // ---------------------------------------------------------------------------
-// Store
-// ---------------------------------------------------------------------------
-
-/// All live web surfaces keyed by shell id. The shell routes geometry/input
-/// through this store and polls events per frame.
-pub struct WebViewStore {
-    views: HashMap<WebViewId, Box<dyn WebView>>,
-}
-
-impl Default for WebViewStore {
-    fn default() -> Self {
-        Self { views: HashMap::new() }
-    }
-}
-
-impl WebViewStore {
-    pub fn add(&mut self, view: Box<dyn WebView>) -> WebViewId {
-        let id = view.id();
-        self.views.insert(id, view);
-        id
-    }
-
-    #[allow(dead_code)]
-    pub fn get(&self, id: WebViewId) -> Option<&dyn WebView> {
-        self.views.get(&id).map(|v| v.as_ref())
-    }
-
-    pub fn send(&self, id: WebViewId, cmd: WebViewCommand) -> Result<()> {
-        self.views
-            .get(&id)
-            .ok_or_else(|| anyhow!("unknown webview {id}"))?
-            .send(cmd)
-    }
-
-    pub fn drain_events(&mut self) -> Vec<(WebViewId, WebViewEvent)> {
-        let mut out = Vec::new();
-        for (id, view) in self.views.iter_mut() {
-            for ev in view.events().try_iter() {
-                out.push((*id, ev));
-            }
-        }
-        out
-    }
-
-    pub fn remove(&mut self, id: WebViewId) -> Option<Box<dyn WebView>> {
-        self.views.remove(&id)
-    }
-}
-
-// ---------------------------------------------------------------------------
 // fake CDP server used by tests (no chrome binary required)
 // ---------------------------------------------------------------------------
 
@@ -953,14 +911,13 @@ mod tests {
     use crate::testing::FakeCdpServer;
 
     fn data_dir(name: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!(
+        std::env::temp_dir().join(format!(
             "webview-cdp-{name}-{}",
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap()
                 .subsec_nanos()
-        ));
-        dir
+        ))
     }
 
     #[test]
@@ -980,17 +937,6 @@ mod tests {
         view.send(WebViewCommand::Navigate("https://example.com".into())).unwrap();
         view.send(WebViewCommand::Reload).unwrap();
         view.send(WebViewCommand::Keys(vec![KeyInput::new("a", InputMods::default())])).unwrap();
-    }
-
-    #[test]
-    fn store_routes_commands() {
-        let server = FakeCdpServer::start();
-        let view = ChromeEngine::open_webview(server.port, "about:blank").unwrap();
-        let id = view.id();
-        let mut store = WebViewStore::default();
-        store.add(Box::new(view));
-        store.send(id, WebViewCommand::Resize { width: 800, height: 600 }).unwrap();
-        assert!(store.send(9999, WebViewCommand::Reload).is_err());
     }
 
     #[test]
