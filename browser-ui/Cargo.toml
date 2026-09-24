@@ -25,6 +25,8 @@ futures-lite = "2"
 base64 = "0.22"
 tracing.workspace = true
 tracing-subscriber.workspace = true
+raw-window-handle.workspace = true
+libc.workspace = true
 
 [[bench]]
 name = "layout_bench"

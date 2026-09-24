@@ -707,6 +707,8 @@ dependencies = [
  "futures-lite 2.6.1",
  "gpui",
  "image",
+ "libc",
+ "raw-window-handle",
  "serde",
  "serde_json",
  "smallvec",
@@ -6422,6 +6424,7 @@ dependencies = [
  "anyhow",
  "browser-core",
  "cef-sys",
+ "libc",
  "webview-cdp",
 ]
 

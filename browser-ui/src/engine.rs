@@ -13,7 +13,7 @@
 use anyhow::{anyhow, Result};
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, AtomicU8};
+use std::sync::atomic::AtomicU8;
 use std::sync::{Arc, Mutex};
 use webview_cdp::{
     InputMods, KeyInput, MouseButton as CdpMouseButton, MouseKind, WebView, WebViewCommand,
@@ -26,7 +26,6 @@ pub enum Backend {
     Cdp,
 }
 
-const BACKEND_NONE: u8 = 0;
 const BACKEND_CEF: u8 = 1;
 const BACKEND_CDP: u8 = 2;
 
@@ -60,7 +59,6 @@ impl PageView {
 pub struct EngineController {
     shared: Arc<Mutex<EngineShared>>,
     backend: Arc<AtomicU8>,
-    dead: Arc<AtomicBool>,
     /// CDP-only: chrome process handle for shutdown.
     cdp_engine: Option<Arc<webview_cdp::ChromeEngine>>,
     cdp_data_dir: Option<PathBuf>,
@@ -108,7 +106,6 @@ impl EngineController {
         Ok(Self {
             shared: Arc::new(Mutex::new(EngineShared::default())),
             backend: Arc::new(AtomicU8::new(BACKEND_CEF)),
-            dead: Arc::new(AtomicBool::new(false)),
             cdp_engine: None,
             cdp_data_dir: None,
         })
@@ -129,7 +126,6 @@ impl EngineController {
                     return Ok(Self {
                         shared: Arc::new(Mutex::new(EngineShared::default())),
                         backend: Arc::new(AtomicU8::new(BACKEND_CDP)),
-                        dead: Arc::new(AtomicBool::new(false)),
                         cdp_engine: Some(Arc::new(engine)),
                         cdp_data_dir: Some(data_dir),
                     });
@@ -272,15 +268,6 @@ impl EngineController {
         }
     }
 
-    /// Popup layer state (CEF backend).
-    pub fn popup_info(&self, page_id: u64) -> Option<(bool, [i32; 4])> {
-        let shared = self.shared.lock().unwrap();
-        match shared.views.get(&page_id) {
-            Some(PageView::Cef(v)) => Some((v.popup_visible(), v.popup_rect())),
-            _ => None,
-        }
-    }
-
     /// Poll every webview for events; return (page_id, event) pairs.
     pub fn drain_events(&self) -> Vec<(u64, WebViewEvent)> {
         let shared = self.shared.lock().unwrap();
@@ -293,6 +280,25 @@ impl EngineController {
         browser_core::perf_event!("engine.drained", "events" => out.len(),
             "views" => shared.views.len());
         out
+    }
+
+    pub fn wayland_init(&self, display: *mut std::ffi::c_void, parent_surface: *mut std::ffi::c_void) -> bool {
+        webview_cef::wayland_init(display, parent_surface)
+    }
+
+    pub fn set_geometry(&self, page_id: u64, x: i32, y: i32, w: i32, h: i32, visible: bool, has_overlay: bool) {
+        let shared = self.shared.lock().unwrap();
+        if let Some(PageView::Cef(v)) = shared.views.get(&page_id) {
+            v.set_geometry(x, y, w, h, visible, has_overlay);
+        }
+    }
+
+    pub fn get_screenshot(&self, page_id: u64) -> Option<(u32, u32, Vec<u8>)> {
+        let shared = self.shared.lock().unwrap();
+        match shared.views.get(&page_id) {
+            Some(PageView::Cef(v)) => v.get_screenshot(),
+            _ => None,
+        }
     }
 
     pub fn shutdown(&self) {

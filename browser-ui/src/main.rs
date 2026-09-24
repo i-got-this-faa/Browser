@@ -15,7 +15,7 @@ use anyhow::{Context as _, Result};
 use browser_config::{config_path, ensure_default_config, watch_config, Config, WatcherHandle};
 use browser_core::{perf_event, perf_span};
 use std::collections::HashMap;
-use browser_layout::{frame_geometries_scaled, scroll_step, Viewport};
+use browser_layout::{frame_geometries, scroll_step, Viewport};
 use browser_runtime::{ops, BrowserState, LuaHost, Request};
 use engine::EngineController;
 use gpui::{
@@ -60,7 +60,29 @@ fn main() -> Result<()> {
                 window_decorations: Some(gpui::WindowDecorations::Client),
                 ..Default::default()
             },
-            |_, cx| cx.new(|cx| Shell::new(engine.clone(), cx)),
+            |window, cx| {
+                use raw_window_handle::{HasDisplayHandle, HasWindowHandle};
+                let mut wayland_active = false;
+                if let (Ok(disp), Ok(win)) = (
+                    HasDisplayHandle::display_handle(window),
+                    HasWindowHandle::window_handle(window),
+                ) {
+                    if let (
+                        raw_window_handle::RawDisplayHandle::Wayland(d),
+                        raw_window_handle::RawWindowHandle::Wayland(w),
+                    ) = (disp.as_raw(), win.as_raw())
+                    {
+                        wayland_active = engine.wayland_init(
+                            d.display.as_ptr() as *mut _,
+                            w.surface.as_ptr() as *mut _,
+                        );
+                        if wayland_active {
+                            tracing::info!("initialized native Wayland subsurface presentation");
+                        }
+                    }
+                }
+                cx.new(|cx| Shell::new(engine.clone(), wayland_active, cx))
+            },
         )
         .unwrap();
     });
@@ -127,12 +149,15 @@ struct Shell {
     view_sizes: HashMap<u64, (u32, u32)>,
     /// Last hidden state pushed per page; avoids redundant SetHidden commands.
     focus_cache: HashMap<u64, bool>,
+    wayland_active: bool,
 }
 
-/// One page's render surface. `bgra` is the stable CPU-side frame (CEF writes
-/// it through the shim buffer patch); `painted` is the GPUI texture derived
-/// from it. The texture is only recreated when `version` advances (damage or
-/// resize), and the atlas tile recycles via drop_image -> free_list.
+/// One page's render surface. `bgra` is the LIVE CPU-side frame: the pump
+/// patches engine damage into it in place, and it accumulates the full page
+/// across publishes. `painted` is the GPUI texture snapshot derived from it;
+/// it is only rebuilt when `version` advances (damage or resize), and the
+/// superseded atlas tile is retired via drop_image on every publish (each
+/// skipped retirement leaks a full-page texture).
 struct Surface {
     bgra: Vec<u8>,
     width: u32,
@@ -210,37 +235,36 @@ impl Surface {
     ///
     /// gpui's sprite atlas keys tiles by `ImageId` and reads bytes only on
     /// first insert (`get_or_insert_with`), so updated pixels require a NEW
-    /// RenderImage — reusing the old one would keep drawing stale tiles. The
-    /// superseded image is released from every window's atlas, else each
-    /// damage event would leak a full-page tile.
-    fn texture(&mut self, cx: &mut Context<Shell>) -> Option<Arc<RenderImage>> {
+    /// RenderImage — reusing the old one would keep drawing stale tiles.
+    ///
+    /// The buffer is NOT handed to gpui by value: `bgra` is the live
+    /// cumulative frame the pump keeps patching, so publishing snapshots it
+    /// with one bounded clone and `bgra` stays intact for the next damage
+    /// round. Taking ownership used to zero the live buffer between
+    /// publishes — every later patch repainted only its damage rect into a
+    /// zeroed page, leaving black holes everywhere except whichever region
+    /// happened to be damaged last (the floating-content-on-black bug).
+    ///
+    /// The superseded image is retired through THIS window's atlas: during
+    /// paint gpui holds the current window taken out of `App.windows`, so
+    /// `drop_image(old, None)` iterates only the OTHER windows and skips the
+    /// one that actually inserted the tile — leaking a full-page texture per
+    /// damage event. Same `Some(window)` pattern as gpui's image cache.
+    fn texture(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Shell>,
+    ) -> Option<Arc<RenderImage>> {
         if self.painted.is_some() && self.painted_version == self.version {
             return self.painted.clone();
         }
-        if self.width == 0 || self.height == 0 || self.bgra.is_empty() {
+        let bytes = self.width as usize * self.height as usize * 4;
+        if bytes == 0 || self.bgra.len() != bytes {
             return None;
         }
-        // Buffer is BGRA (CEF's format; patch_png swaps too) — gpui wants BGRA.
-        // Take ownership instead of cloning: the previous clone copied the
-        // full ~4MB frame per upload (230MB copied in 26s idle in the audit).
-        // The surface gets a fresh lazily-zeroed allocation for the next
-        // damage round; size is unchanged so patch_raw keeps fast-pathing.
+        // BGRA (CEF's format; patch_png swaps too) — gpui wants BGRA.
         let __t0 = std::time::Instant::now();
-        let bytes = self.bgra.len();
-        let taken = std::mem::take(&mut self.bgra);
-        let frame = match image::RgbaImage::from_raw(self.width, self.height, taken) {
-            Some(f) => f,
-            None => {
-                // Dimensions don't match the buffer (should be impossible:
-                // patch_raw/patch_png keep len == w*h*4). Reset fully so the
-                // next patch_raw reallocates instead of slicing a short buf.
-                self.width = 0;
-                self.height = 0;
-                self.bgra = Vec::new();
-                return None;
-            }
-        };
-        self.bgra = vec![0u8; bytes];
+        let frame = image::RgbaImage::from_raw(self.width, self.height, self.bgra.clone())?;
         perf_event!("surface.texture_upload",
             "bytes" => bytes,
             "us" => __t0.elapsed().as_micros() as u64);
@@ -250,7 +274,7 @@ impl Surface {
         let old = self.painted.replace(Arc::clone(&next));
         self.painted_version = self.version;
         if let Some(old) = old {
-            cx.drop_image(old, None);
+            cx.drop_image(old, Some(window));
         }
         Some(next)
     }
@@ -263,7 +287,11 @@ impl Focusable for Shell {
 }
 
 impl Shell {
-    fn new(engine: EngineController, cx: &mut Context<Self>) -> Self {
+    fn new(
+        engine: EngineController,
+        wayland_active: bool,
+        cx: &mut Context<Self>,
+    ) -> Self {
         let (tx, reload_rx) = std::sync::mpsc::channel();
         // Watcher must outlive this constructor or the watch is unregistered
         // and browser.lua hot-reload dies (was a local: dropped on return).
@@ -288,9 +316,10 @@ impl Shell {
             surfaces: HashMap::new(),
             view_sizes: HashMap::new(),
             focus_cache: HashMap::new(),
+            wayland_active,
         };
         shell.reload_lua(cx);
-        shell.ensure_first_page();
+        shell.ensure_first_page(cx);
 
         // Event-driven frame pump: awaits browser_core::wakeslot::frame_wake()
         // instead of ticking a ~60Hz timer, so an idle shell runs zero pump
@@ -318,13 +347,13 @@ impl Shell {
         shell
     }
 
-    fn ensure_first_page(&mut self) {
+    fn ensure_first_page(&mut self, cx: &mut Context<Self>) {
         if self.state.strip.pages.is_empty() {
             let home = self.config.behavior.home_page.clone();
             let id = self.state.add_page(&home, &self.viewport);
             let mut fx = ops::Effects::default();
             fx.spawn.push((id, home));
-            self.effects(&mut fx);
+            self.effects(&mut fx, cx);
         }
     }
 
@@ -456,7 +485,7 @@ impl Shell {
     // -- dispatch -----------------------------------------------------------
 
     /// Apply engine/UI side effects.
-    fn effects(&mut self, fx: &mut ops::Effects) {
+    fn effects(&mut self, fx: &mut ops::Effects, cx: &mut Context<Self>) {
         for (id, url) in fx.spawn.drain(..) {
             if url.is_empty() {
                 continue;
@@ -489,11 +518,22 @@ impl Shell {
         for id in fx.close.drain(..) {
             self.engine.close_page(id);
             self.view_sizes.remove(&id);
-            self.surfaces.remove(&id);
+            self.retire_surface(id, cx);
             self.focus_cache.remove(&id);
         }
         if let Some(text) = fx.toast.take() {
             self.toast(text);
+        }
+    }
+
+    /// Remove a page's render surface, retiring its atlas tile. Runs on the
+    /// pump, where the current window IS inside `App.windows`, so
+    /// `drop_image(_, None)` reaches every window that holds the texture.
+    fn retire_surface(&mut self, id: u64, cx: &mut Context<Self>) {
+        if let Some(surface) = self.surfaces.remove(&id) {
+            if let Some(image) = surface.painted {
+                cx.drop_image(image, None);
+            }
         }
     }
 
@@ -527,7 +567,7 @@ impl Shell {
         if fx.palette_open {
             self.overlay = Overlay::Palette { text: String::new(), selected: 0 };
         }
-        self.effects(&mut fx);
+        self.effects(&mut fx, cx);
         if fx.quit {
             // Palette/Lua `app.quit`: ops set Effects::quit; nothing read it
             // before, so the command silently did nothing.
@@ -692,11 +732,25 @@ impl Shell {
                     self.fire_hook("page_navigated", Some(payload), cx);
                     dirty = true;
                 }
+                webview_cdp::WebViewEvent::Dmabuf {
+                    fd,
+                    ..
+                } => {
+                    let __t0 = std::time::Instant::now();
+                    unsafe { libc::close(fd); }
+                    if let Some(slot) = self.state.slot_mut(page_id) {
+                        slot.loading = false;
+                    }
+                    perf_event!("frame.dmabuf",
+                        "page" => page_id,
+                        "us" => __t0.elapsed().as_micros() as u64);
+                    dirty = true;
+                }
                 webview_cdp::WebViewEvent::Closed => {
                     if self.state.close_page(page_id, &self.viewport).is_some() {
                         self.engine.close_page(page_id);
                     }
-                    self.surfaces.remove(&page_id);
+                    self.retire_surface(page_id, cx);
                     self.view_sizes.remove(&page_id);
                     self.focus_cache.remove(&page_id);
                     dirty = true;
@@ -956,17 +1010,26 @@ impl Shell {
         if self.config.behavior.show_status_bar { STATUS_BAR_H } else { 0.0 }
     }
 
-    // -- mouse --------------------------------------------------------------
+    /// Overview zoom: the whole strip shrinks around the viewport center.
+    /// Same constant the agent API reports geometry with, so agent clicks
+    /// land where the renderer draws.
+    const OVERVIEW_SCALE: f32 = 0.55;
 
-    fn page_under(&self, pos: Point<Pixels>) -> Option<(u64, Point<Pixels>)> {
-        let scale = if self.state.overview_open { 0.55 } else { 1.0 };
-        let geos = frame_geometries_scaled(
+    /// Per-page on-screen geometry at the current scroll/overview state.
+    /// One pass feeds hit-testing, webview resize, and the element tree.
+    fn page_geos(&self) -> Vec<(u64, browser_layout::PageGeometry)> {
+        frame_geometries(
             &self.state.strip,
             &self.viewport,
             self.state.scroll,
-            self.state.strip.page_fraction,
-            scale,
-        );
+            if self.state.overview_open { Self::OVERVIEW_SCALE } else { 1.0 },
+        )
+    }
+
+    // -- mouse --------------------------------------------------------------
+
+    fn page_under(&self, pos: Point<Pixels>) -> Option<(u64, Point<Pixels>)> {
+        let geos = self.page_geos();
         for (id, g) in geos {
             let x0 = g.rel_x;
             let x1 = g.rel_x + g.width;
@@ -1099,18 +1162,10 @@ impl Render for Shell {
             }
         }
 
-        // Overview: zoom the whole strip out around the center (niri-style).
         // One geometry pass feeds both the webview resize check and the
         // element tree (the two-pass version duplicated the math per frame).
-        let scale = if self.state.overview_open { 0.55 } else { 1.0 };
         let __t_geo = std::time::Instant::now();
-        let geos = frame_geometries_scaled(
-            &self.state.strip,
-            &self.viewport,
-            self.state.scroll,
-            self.state.strip.page_fraction,
-            scale,
-        );
+        let geos = self.page_geos();
         perf_event!("render.geos",
             "pages" => geos.len(),
             "us" => __t_geo.elapsed().as_micros() as u64);
@@ -1143,6 +1198,24 @@ impl Render for Shell {
             perf_event!("render.resize_calls", "pages" => resize_count);
         }
 
+        let chrome_top = self.chrome_top();
+        let has_overlay = !matches!(self.overlay, Overlay::None);
+        if self.wayland_active {
+            let visible_ids: std::collections::HashSet<u64> = geos.iter().map(|(id, _)| *id).collect();
+            for (id, g) in &geos {
+                let x = g.rel_x.round() as i32;
+                let y = (g.top + chrome_top).round() as i32;
+                let w = g.width.round() as i32;
+                let h = g.height.round() as i32;
+                self.engine.set_geometry(*id, x, y, w, h, true, has_overlay);
+            }
+            for p in &self.state.strip.pages {
+                if !visible_ids.contains(&p.id) {
+                    self.engine.set_geometry(p.id, 0, 0, 0, 0, false, has_overlay);
+                }
+            }
+        }
+
         let bg = hex(&self.config.theme.bg);
         let bar_bg = hex(&self.config.theme.bar);
         let bar_text = hex(&self.config.theme.bar_text);
@@ -1170,7 +1243,6 @@ impl Render for Shell {
                 .top(px(g.top + self.chrome_top()))
                 .w(px(g.width))
                 .h(px(g.height))
-                .bg(bar_bg)
                 .border_1()
                 .border_color(if is_active { border_focus } else { border })
                 .overflow_hidden()
@@ -1183,37 +1255,27 @@ impl Render for Shell {
                 .on_mouse_move(cx.listener(Self::on_mouse_move))
                 .on_scroll_wheel(cx.listener(Self::on_scroll));
 
-            // Engine frames live in `surfaces` (written by the event pump);
-            // publish any newer buffer once per rendered frame here. Hidden
-            // pages (other workspaces) never enter this loop, so their
-            // buffers are never uploaded while invisible.
-            let tex = {
-                let surface = self.surfaces.get_mut(&id);
-                surface.and_then(|s| s.texture(cx))
-            };
-            if let Some(image) = tex {
-                frame = frame.child(
-                    img(ImageSource::Render(image)).object_fit(ObjectFit::Fill).size_full(),
-                );
-            } else if let Some(png) = &slot.frame_png {
-                if let Some(bgra) = decode_png_bgra(png) {
-                    let image = Arc::new(RenderImage::new(
-                        smallvec::smallvec![image::Frame::new(bgra)],
-                    ));
+            if !self.wayland_active {
+                frame = frame.bg(bar_bg);
+                let tex = {
+                    let surface = self.surfaces.get_mut(&id);
+                    surface.and_then(|s| s.texture(window, cx))
+                };
+                if let Some(image) = tex {
                     frame = frame.child(
                         img(ImageSource::Render(image)).object_fit(ObjectFit::Fill).size_full(),
                     );
+                } else if slot.loading {
+                    frame = frame.child(
+                        div()
+                            .size_full()
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .text_color(bar_text)
+                            .child(format!("loading {title}")),
+                    );
                 }
-            } else if slot.loading {
-                frame = frame.child(
-                    div()
-                        .size_full()
-                        .flex()
-                        .items_center()
-                        .justify_center()
-                        .text_color(bar_text)
-                        .child(format!("loading {title}")),
-                );
             }
 
             // No floating title chip here: it hovered over page content and

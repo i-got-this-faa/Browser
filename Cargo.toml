@@ -35,3 +35,9 @@ anyhow = "1"
 async-channel = "1"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", default-features = false, features = ["std", "alloc", "registry"] }
+wayland-client = "0.31"
+wayland-protocols = { version = "0.31", features = ["client", "staging"] }
+wayland-backend = "0.3"
+wayland-sys = "0.31"
+raw-window-handle = "0.6"
+libc = "0.2"

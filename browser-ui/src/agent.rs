@@ -16,7 +16,7 @@
 //! JSON reply line back.
 
 use crate::Shell;
-use browser_layout::{frame_geometries_scaled, scroll_to_page};
+use browser_layout::{frame_geometries, scroll_to_page};
 use serde_json::{json, Value};
 
 /// Every command the control socket understands: name, arg format, and what
@@ -106,13 +106,7 @@ pub fn help_json(shell: &Shell) -> String {
 pub fn agent_state_json(shell: &Shell) -> String {
     let active = shell.state.active_id();
     let vp = shell.viewport;
-    let geos = frame_geometries_scaled(
-        &shell.state.strip,
-        &vp,
-        shell.state.scroll,
-        shell.state.strip.page_fraction,
-        if shell.state.overview_open { 0.55 } else { 1.0 },
-    );
+    let geos = overview_geos(shell);
     let geo = |id: u64| -> Option<Value> {
         geos.iter().find(|(gid, _)| *gid == id).map(|(_, g)| {
             json!({
@@ -155,6 +149,19 @@ pub fn agent_state_json(shell: &Shell) -> String {
         "pages": pages,
     })
     .to_string()
+}
+
+/// Overview zoom: the whole strip shrinks around the viewport center.
+const OVERVIEW_SCALE: f32 = 0.55;
+
+/// Per-page on-screen geometry at the shell's current scroll/overview state.
+fn overview_geos(shell: &Shell) -> Vec<(u64, browser_layout::PageGeometry)> {
+    frame_geometries(
+        &shell.state.strip,
+        &shell.viewport,
+        shell.state.scroll,
+        if shell.state.overview_open { OVERVIEW_SCALE } else { 1.0 },
+    )
 }
 
 /// Resolve an agent-supplied page selector: numeric id, "active", or a
@@ -287,17 +294,25 @@ fn wheel(
 /// Zero new engine machinery: this is the exact buffer the renderer shows.
 fn screenshot(shell: &Shell, sel: &str) -> Result<Value, String> {
     let id = resolve_id(shell, sel).ok_or("no page")?;
-    let surface = shell.surfaces.get(&id).ok_or("no frame yet for page")?;
-    if surface.width == 0 || surface.height == 0 || surface.bgra.is_empty() {
-        return Err("no frame yet for page".into());
-    }
-    // BGRA -> RGBA swizzle, then encode. ~4MB copy; screenshots are rare.
-    let mut rgba = surface.bgra.clone();
-    for px in rgba.chunks_exact_mut(4) {
-        px.swap(0, 2);
-    }
+    let (w, h, rgba) = if let Some((w, h, mut bgra)) = shell.engine.get_screenshot(id) {
+        for px in bgra.chunks_exact_mut(4) {
+            px.swap(0, 2);
+        }
+        (w, h, bgra)
+    } else {
+        let surface = shell.surfaces.get(&id).ok_or("no frame yet for page")?;
+        if surface.width == 0 || surface.height == 0 || surface.bgra.is_empty() {
+            return Err("no frame yet for page".into());
+        }
+        let mut rgba = surface.bgra.clone();
+        for px in rgba.chunks_exact_mut(4) {
+            px.swap(0, 2);
+        }
+        (surface.width, surface.height, rgba)
+    };
+
     let img =
-        image::RgbaImage::from_raw(surface.width, surface.height, rgba).ok_or("frame size mismatch")?;
+        image::RgbaImage::from_raw(w, h, rgba).ok_or("frame size mismatch")?;
     let mut png = std::io::Cursor::new(Vec::new());
     img.write_to(&mut png, image::ImageFormat::Png)
         .map_err(|e| format!("png encode: {e}"))?;
@@ -305,8 +320,8 @@ fn screenshot(shell: &Shell, sel: &str) -> Result<Value, String> {
     Ok(json!({
         "ok": true,
         "page": id,
-        "w": surface.width,
-        "h": surface.height,
+        "w": w,
+        "h": h,
         "png_base64": base64::engine::general_purpose::STANDARD.encode(png.into_inner()),
     }))
 }
@@ -314,14 +329,7 @@ fn screenshot(shell: &Shell, sel: &str) -> Result<Value, String> {
 /// One page's on-screen geometry.
 fn page_geometry(shell: &Shell, sel: &str) -> Result<Value, String> {
     let id = resolve_id(shell, sel).ok_or("no page")?;
-    let geos = frame_geometries_scaled(
-        &shell.state.strip,
-        &shell.viewport,
-        shell.state.scroll,
-        shell.state.strip.page_fraction,
-        if shell.state.overview_open { 0.55 } else { 1.0 },
-    );
-    let (_, g) = geos
+    let (_, g) = overview_geos(shell)
         .into_iter()
         .find(|(gid, _)| *gid == id)
         .ok_or("page has no geometry (hidden workspace?)")?;
@@ -407,42 +415,24 @@ fn config_json(shell: &Shell) -> String {
 
 /// Dispatch one agent request. Returns the reply line (already valid JSON),
 /// or None when `cmd` is not an agent command (the caller falls through to
-/// the legacy native commands). `exec` and legacy `key` keep their original
-/// control.rs behavior for backwards compatibility.
+/// the legacy native commands).
 pub fn handle(
     shell: &mut Shell,
     cmd: &str,
     arg: &str,
     cx: &mut gpui::Context<Shell>,
 ) -> Option<String> {
-    if !is_agent_command(cmd) {
-        return None;
-    }
-    let reply = dispatch(shell, cmd, arg, cx);
+    let reply = match cmd {
+        "help" | "get_state" | "page_geometry" | "click" | "type" | "key" | "wheel"
+        | "screenshot" | "open" | "scroll_to" | "overlay" | "toast" | "config.get" => {
+            dispatch(shell, cmd, arg, cx)
+        }
+        _ => return None,
+    };
     Some(match reply {
         Ok(v) => v.to_string(),
         Err(e) => json!({ "ok": false, "error": e }).to_string(),
     })
-}
-
-/// The full agent command list; keeps `handle`'s fallthrough honest.
-fn is_agent_command(cmd: &str) -> bool {
-    matches!(
-        cmd,
-        "help"
-            | "get_state"
-            | "page_geometry"
-            | "click"
-            | "type"
-            | "key"
-            | "wheel"
-            | "screenshot"
-            | "open"
-            | "scroll_to"
-            | "overlay"
-            | "toast"
-            | "config.get"
-    )
 }
 
 fn dispatch(
@@ -452,9 +442,9 @@ fn dispatch(
     cx: &mut gpui::Context<Shell>,
 ) -> Result<Value, String> {
     match cmd {
-        "help" => return Ok(serde_json::from_str(&help_json(shell)).unwrap_or_default()),
-        "get_state" => return Ok(serde_json::from_str(&agent_state_json(shell)).unwrap_or_default()),
-        "config.get" => return Ok(serde_json::from_str(&config_json(shell)).unwrap_or_default()),
+        "help" => Ok(serde_json::from_str(&help_json(shell)).unwrap_or_default()),
+        "get_state" => Ok(serde_json::from_str(&agent_state_json(shell)).unwrap_or_default()),
+        "config.get" => Ok(serde_json::from_str(&config_json(shell)).unwrap_or_default()),
         "page_geometry" => page_geometry(shell, arg),
         "click" => {
             let mut it = arg.split_whitespace();
@@ -501,12 +491,8 @@ fn dispatch(
             shell.toast(arg.to_string());
             Ok(json!({ "ok": true }))
         }
-        _ => unreachable("is_agent_command guarantees a known command"),
+        _ => unreachable!("is_agent_command guarantees a known command"),
     }
-}
-
-fn unreachable(msg: &str) -> ! {
-    panic!("agent dispatch: {msg}")
 }
 
 /// Split "text @sel" -> (text, sel). Absent separator -> (whole, "active").
