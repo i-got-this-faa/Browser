@@ -17,6 +17,7 @@ pub const CEF_EV_URL: u32 = 4;
 pub const CEF_EV_LOADING: u32 = 5;
 pub const CEF_EV_CLOSED: u32 = 6;
 pub const CEF_EV_DMABUF: u32 = 7;
+pub const CEF_EV_CURSOR: u32 = 8;
 
 #[repr(C)]
 #[derive(Copy, Clone)]
@@ -28,6 +29,7 @@ pub struct CefEvent {
     pub rects: [[i32; 4]; 16],
     pub nrects: c_int,
     pub loading: c_int,
+    pub cursor_type: c_int,
     pub str_: *const c_char,
     pub dmabuf_fd: c_int,
     pub stride: u32,
@@ -104,4 +106,8 @@ unsafe extern "C" {
         out_h: *mut i32,
         out_size: *mut usize,
     ) -> c_int;
+
+    pub fn cef_set_target_frame_rate(fps: c_int);
+    pub fn cef_get_target_frame_rate() -> c_int;
+    pub fn cef_view_set_frame_rate(view: *mut c_void, fps: c_int);
 }

@@ -20,6 +20,7 @@ enum {
   CEF_EV_LOADING = 5,
   CEF_EV_CLOSED = 6,
   CEF_EV_DMABUF = 7,      // native dmabuf frame delivered
+  CEF_EV_CURSOR = 8,      // cursor shape changed (cef_cursor_type_t)
 };
 
 typedef struct {
@@ -32,6 +33,7 @@ typedef struct {
   int32_t rects[16][4];
   int32_t nrects;
   int32_t loading;          // CEF_EV_LOADING: 1 = loading, 0 = done
+  int32_t cursor_type;      // CEF_EV_CURSOR: cef_cursor_type_t enum value
   // CEF_EV_TITLE / CEF_EV_URL: UTF-8, valid only during the sink call.
   const char *str;
   // CEF_EV_DMABUF:
@@ -103,6 +105,11 @@ void cef_view_attach_wayland(void *view);
 void cef_view_set_geometry(void *view, int32_t x, int32_t y, int32_t w, int32_t h,
                            int32_t visible, int32_t has_overlay);
 int cef_view_get_screenshot(void *view, uint8_t **out_buf, int32_t *out_w, int32_t *out_h, size_t *out_size);
+
+// Frame rate control (refresh rate matching, e.g. 144Hz)
+void cef_set_target_frame_rate(int32_t fps);
+int32_t cef_get_target_frame_rate(void);
+void cef_view_set_frame_rate(void *view, int32_t fps);
 
 #ifdef __cplusplus
 }

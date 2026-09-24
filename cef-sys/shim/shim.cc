@@ -17,11 +17,14 @@
 
 #include <algorithm>
 #include <atomic>
+#include <chrono>
 #include <cstring>
 #include <map>
+#include <memory>
 #include <mutex>
 #include <string>
 #include <sys/mman.h>
+#include <sys/stat.h>
 #include <unistd.h>
 #include <vector>
 
@@ -50,11 +53,18 @@ struct WlContext {
   struct wl_subcompositor* subcompositor = nullptr;
   struct zwp_linux_dmabuf_v1* dmabuf = nullptr;
   struct wp_viewporter* viewporter = nullptr;
+  struct wl_output* output = nullptr;
   std::mutex mu;
 };
 
 static WlContext g_wl;
 #endif
+
+static std::atomic<int32_t> g_target_fps{0};
+int32_t get_target_frame_rate();
+void cef_set_target_frame_rate(int32_t fps);
+int32_t cef_get_target_frame_rate();
+void cef_view_set_frame_rate(void* view, int32_t fps);
 
 #include "include/cef_app.h"
 #include "include/cef_browser.h"
@@ -205,6 +215,45 @@ void emit_frame(uint64_t id, bool popup, int32_t w, int32_t h,
 // chains (global map + handlers + in-flight lambdas), never raw delete.
 // ---------------------------------------------------------------------------
 
+#ifdef STRIP_WAYLAND_DMABUF
+struct BufferKey {
+  uint64_t inode = 0;
+  uint32_t width = 0;
+  uint32_t height = 0;
+  uint32_t stride = 0;
+  uint64_t modifier = 0;
+  uint64_t offset = 0;
+
+  bool operator<(const BufferKey& o) const {
+    if (inode != o.inode) return inode < o.inode;
+    if (width != o.width) return width < o.width;
+    if (height != o.height) return height < o.height;
+    if (stride != o.stride) return stride < o.stride;
+    if (modifier != o.modifier) return modifier < o.modifier;
+    return offset < o.offset;
+  }
+};
+
+struct PooledBuffer {
+  struct wl_buffer* buffer = nullptr;
+  BufferKey key{};
+  bool in_use = false;
+  uint64_t last_used_frame = 0;
+
+  PooledBuffer() = default;
+  ~PooledBuffer() {
+    if (buffer) {
+      wl_buffer_destroy(buffer);
+      buffer = nullptr;
+    }
+  }
+};
+
+struct View;
+static void view_frame_done(void* data, struct wl_callback* cb, uint32_t time);
+static void pooled_buffer_release(void* data, struct wl_buffer*);
+#endif
+
 struct View : public CefBaseRefCounted {
   uint64_t id = 0;
   CefRefPtr<CefBrowser> browser;  // UI thread only
@@ -229,6 +278,11 @@ struct View : public CefBaseRefCounted {
   struct wl_subsurface* subsurface = nullptr;
   struct wp_viewport* viewport = nullptr;
   struct wl_buffer* current_buffer = nullptr;
+  struct wl_callback* frame_callback = nullptr;
+  bool frame_callback_pending = false;
+  std::map<BufferKey, std::unique_ptr<PooledBuffer>> buffer_pool;
+  uint64_t frame_seq = 0;
+
   int32_t last_x = 0, last_y = 0, last_w = 0, last_h = 0;
   bool is_visible = true;
   bool is_above = false;
@@ -240,15 +294,39 @@ struct View : public CefBaseRefCounted {
   int32_t last_buf_h = 0;
   std::mutex wayland_mu;
 
+  void prune_buffer_pool() {
+    if (buffer_pool.size() <= 8) return;
+    for (auto it = buffer_pool.begin(); it != buffer_pool.end(); ) {
+      if (!it->second->in_use && (it->first.width != static_cast<uint32_t>(last_buf_w) || it->first.height != static_cast<uint32_t>(last_buf_h))) {
+        it = buffer_pool.erase(it);
+      } else {
+        ++it;
+      }
+    }
+  }
+
+  void request_frame_callback_locked(struct wl_event_queue* queue);
+
+  void on_vblank_done(uint32_t) {
+    std::lock_guard<std::mutex> lk(wayland_mu);
+    frame_callback = nullptr;
+    frame_callback_pending = false;
+    if (browser) {
+      browser->GetHost()->SendExternalBeginFrame();
+    }
+  }
+
   ~View() override {
     std::lock_guard<std::mutex> lk(wayland_mu);
+    if (frame_callback) {
+      wl_callback_destroy(frame_callback);
+      frame_callback = nullptr;
+    }
+    buffer_pool.clear();
+    current_buffer = nullptr;
     if (last_fd >= 0) {
       close(last_fd);
       last_fd = -1;
-    }
-    if (current_buffer) {
-      wl_buffer_destroy(current_buffer);
-      current_buffer = nullptr;
     }
 #ifdef STRIP_WAYLAND_VIEWPORTER
     if (viewport) {
@@ -271,6 +349,40 @@ struct View : public CefBaseRefCounted {
 };
 
 using ViewRef = CefRefPtr<View>;
+
+#ifdef STRIP_WAYLAND_DMABUF
+static void view_frame_done(void* data, struct wl_callback* cb, uint32_t time) {
+  wl_callback_destroy(cb);
+  View* v = static_cast<View*>(data);
+  if (v) {
+    v->on_vblank_done(time);
+  }
+}
+static const struct wl_callback_listener view_frame_listener = {
+    view_frame_done,
+};
+
+static void pooled_buffer_release(void* data, struct wl_buffer*) {
+  PooledBuffer* pb = static_cast<PooledBuffer*>(data);
+  if (pb) {
+    pb->in_use = false;
+  }
+}
+static const struct wl_buffer_listener pooled_buffer_listener = {
+    pooled_buffer_release,
+};
+
+void View::request_frame_callback_locked(struct wl_event_queue* queue) {
+  if (!frame_callback_pending && child_surface && queue) {
+    frame_callback = wl_surface_frame(child_surface);
+    if (frame_callback) {
+      wl_proxy_set_queue(reinterpret_cast<struct wl_proxy*>(frame_callback), queue);
+      wl_callback_add_listener(frame_callback, &view_frame_listener, this);
+      frame_callback_pending = true;
+    }
+  }
+}
+#endif
 
 // ---------------------------------------------------------------------------
 // Handlers. Created per view; CEF holds refs via the client. Handlers hold
@@ -385,38 +497,69 @@ struct RenderHandler : public CefRenderHandler {
           }
         }
 
-        struct zwp_linux_buffer_params_v1* params =
-            zwp_linux_dmabuf_v1_create_params(g_wl.dmabuf);
-        wl_proxy_set_queue(reinterpret_cast<struct wl_proxy*>(params), g_wl.queue);
+        // Persistent buffer pool: lookup or import dmabuf once
+        BufferKey bkey;
+        struct stat st{};
+        if (info.planes[0].fd >= 0 && fstat(info.planes[0].fd, &st) == 0) {
+          bkey.inode = st.st_ino;
+        } else {
+          bkey.inode = static_cast<uint64_t>(info.planes[0].fd);
+        }
+        bkey.width = buf_w;
+        bkey.height = buf_h;
+        bkey.stride = info.planes[0].stride;
+        bkey.modifier = info.modifier;
+        bkey.offset = info.planes[0].offset;
 
-        uint32_t mod_hi = static_cast<uint32_t>((info.modifier >> 32) & 0xFFFFFFFF);
-        uint32_t mod_lo = static_cast<uint32_t>(info.modifier & 0xFFFFFFFF);
+        PooledBuffer* pb = nullptr;
+        auto it = view->buffer_pool.find(bkey);
+        if (it != view->buffer_pool.end()) {
+          pb = it->second.get();
+        } else {
+          struct zwp_linux_buffer_params_v1* params =
+              zwp_linux_dmabuf_v1_create_params(g_wl.dmabuf);
+          wl_proxy_set_queue(reinterpret_cast<struct wl_proxy*>(params), g_wl.queue);
 
-        zwp_linux_buffer_params_v1_add(params, info.planes[0].fd, 0,
-                                       static_cast<uint32_t>(info.planes[0].offset),
-                                       info.planes[0].stride,
-                                       mod_hi, mod_lo);
+          uint32_t mod_hi = static_cast<uint32_t>((info.modifier >> 32) & 0xFFFFFFFF);
+          uint32_t mod_lo = static_cast<uint32_t>(info.modifier & 0xFFFFFFFF);
 
-        uint32_t drm_format = 0x34325241; // DRM_FORMAT_ARGB8888
-        struct wl_buffer* buf = zwp_linux_buffer_params_v1_create_immed(
-            params, buf_w, buf_h, drm_format, 0);
-        zwp_linux_buffer_params_v1_destroy(params);
+          zwp_linux_buffer_params_v1_add(params, info.planes[0].fd, 0,
+                                         static_cast<uint32_t>(info.planes[0].offset),
+                                         info.planes[0].stride,
+                                         mod_hi, mod_lo);
 
-        if (buf) {
-          wl_proxy_set_queue(reinterpret_cast<struct wl_proxy*>(buf), g_wl.queue);
-          wl_surface_attach(view->child_surface, buf, 0, 0);
+          uint32_t drm_format = 0x34325241; // DRM_FORMAT_ARGB8888
+          struct wl_buffer* buf = zwp_linux_buffer_params_v1_create_immed(
+              params, buf_w, buf_h, drm_format, 0);
+          zwp_linux_buffer_params_v1_destroy(params);
+
+          if (buf) {
+            wl_proxy_set_queue(reinterpret_cast<struct wl_proxy*>(buf), g_wl.queue);
+            auto new_pb = std::make_unique<PooledBuffer>();
+            new_pb->buffer = buf;
+            new_pb->key = bkey;
+            new_pb->in_use = false;
+            wl_buffer_add_listener(buf, &pooled_buffer_listener, new_pb.get());
+            pb = new_pb.get();
+            view->buffer_pool[bkey] = std::move(new_pb);
+            view->prune_buffer_pool();
+          }
+        }
+
+        if (pb && pb->buffer) {
+          pb->in_use = true;
+          pb->last_used_frame = ++view->frame_seq;
+          wl_surface_attach(view->child_surface, pb->buffer, 0, 0);
           wl_surface_damage(view->child_surface, 0, 0, INT32_MAX, INT32_MAX);
 #ifdef STRIP_WAYLAND_VIEWPORTER
           if (view->viewport && view->w > 0 && view->h > 0) {
             wp_viewport_set_destination(view->viewport, view->w, view->h);
           }
 #endif
+          // Align next frame deadline with Wayland vblank
+          view->request_frame_callback_locked(g_wl.queue);
           wl_surface_commit(view->child_surface);
-
-          if (view->current_buffer) {
-            wl_buffer_destroy(view->current_buffer);
-          }
-          view->current_buffer = buf;
+          view->current_buffer = pb->buffer;
 
           if (view->last_fd >= 0) close(view->last_fd);
           view->last_fd = dup(info.planes[0].fd);
@@ -453,6 +596,19 @@ struct DisplayHandler : public CefDisplayHandler {
     std::string u = url.ToString();
     emit(CEF_EV_URL, view->id, u.c_str());
   }
+  bool OnCursorChange(CefRefPtr<CefBrowser>,
+                      CefCursorHandle,
+                      cef_cursor_type_t type,
+                      const CefCursorInfo&) override {
+    cef_sink_fn fn = g_sink.load(std::memory_order_acquire);
+    if (!fn) return false;
+    cef_event_t ev{};
+    ev.kind = CEF_EV_CURSOR;
+    ev.view_id = view->id;
+    ev.cursor_type = static_cast<int32_t>(type);
+    fn(&ev, g_sink_ud.load(std::memory_order_relaxed));
+    return true;
+  }
   ViewRef view;
  private:
   IMPLEMENT_REFCOUNTING(DisplayHandler);
@@ -480,6 +636,7 @@ struct LifeSpanHandler : public CefLifeSpanHandler {
 
   void OnAfterCreated(CefRefPtr<CefBrowser> browser) override {
     view->browser = browser;
+    browser->GetHost()->SendExternalBeginFrame();
   }
 
   void OnBeforeClose(CefRefPtr<CefBrowser>) override {
@@ -562,6 +719,8 @@ class StripApp : public CefApp, public CefBrowserProcessHandler {
     cl->AppendSwitch("disable-features=Translate,BackForwardCache");
     cl->AppendSwitch("mute-audio");
     cl->AppendSwitch("disable-background-timer-throttling");
+    cl->AppendSwitch("enable-smooth-scrolling");
+    cl->AppendSwitchWithValue("enable-features", "SmoothScrolling");
   }
 
   void OnScheduleMessagePumpWork(int64_t) override {
@@ -625,6 +784,47 @@ int cef_engine_start(const char* subprocess, const char* resources,
   return 0;
 }
 
+int32_t get_target_frame_rate() {
+  int32_t fps = g_target_fps.load(std::memory_order_relaxed);
+  if (fps >= 24 && fps <= 360) return fps;
+  const char* env_fps = getenv("STRIP_FPS");
+  if (!env_fps) env_fps = getenv("STRIP_REFRESH_RATE");
+  if (env_fps) {
+    int f = atoi(env_fps);
+    if (f >= 24 && f <= 360) return f;
+  }
+  return 144; // Default to 144 Hz (matching user's 144.15 Hz display)
+}
+
+void cef_set_target_frame_rate(int32_t fps) {
+  if (fps < 24 || fps > 360) return;
+  int32_t old_fps = g_target_fps.exchange(fps);
+  if (old_fps == fps) return;
+  fprintf(stderr, "[CEF SHIM] Target frame rate set to %d FPS\n", fps);
+  std::lock_guard<std::mutex> lk(g_views_mu);
+  for (auto& kv : g_views) {
+    ViewRef v = kv.second;
+    if (v && v->browser) {
+      CefPostTask(TID_UI, base::BindOnce([](ViewRef v, int32_t rate) {
+        if (v && v->browser) v->browser->GetHost()->SetWindowlessFrameRate(rate);
+      }, v, fps));
+    }
+  }
+}
+
+int32_t cef_get_target_frame_rate() {
+  return get_target_frame_rate();
+}
+
+void cef_view_set_frame_rate(void* view, int32_t fps) {
+  View* raw = static_cast<View*>(view);
+  if (!raw || fps < 1 || fps > 360) return;
+  ViewRef v(raw);
+  CefPostTask(TID_UI, base::BindOnce([](ViewRef v, int32_t rate) {
+    if (v && v->browser) v->browser->GetHost()->SetWindowlessFrameRate(rate);
+  }, v, fps));
+}
+
 void* cef_view_create(uint64_t id, const char* url, int32_t w, int32_t h) {
   ViewRef v = new View();
   v->id = id;
@@ -639,8 +839,11 @@ void* cef_view_create(uint64_t id, const char* url, int32_t w, int32_t h) {
   CefWindowInfo info;
   info.SetAsWindowless(cef_window_handle_t());
   info.shared_texture_enabled = 1;
+#ifdef STRIP_WAYLAND_DMABUF
+  info.external_begin_frame_enabled = (g_wl.dmabuf != nullptr) ? 1 : 0;
+#endif
   CefBrowserSettings bs;
-  bs.windowless_frame_rate = 60;
+  bs.windowless_frame_rate = get_target_frame_rate();
 
   CefPostTask(TID_UI, base::BindOnce(
       [](CefRefPtr<Client> client, CefWindowInfo info,
@@ -721,110 +924,95 @@ void cef_view_popup_rect(void* view, int32_t out[4]) {
 // safe during async browser creation and after destroy (view simply gone).
 
 void cef_view_navigate(void* view, const char* url) {
-  View* v = static_cast<View*>(view);
-  if (!v) return;
-  uint64_t id = v->id;
+  View* raw = static_cast<View*>(view);
+  if (!raw) return;
+  ViewRef v(raw);
   CefPostTask(TID_UI, base::BindOnce(
-      [](uint64_t vid, std::string u) {
-        ViewRef v;
-        { std::lock_guard<std::mutex> lk(g_views_mu);
-          auto it = g_views.find(vid);
-          if (it != g_views.end()) v = it->second; }
-        if (v && v->browser) v->browser->GetMainFrame()->LoadURL(u);
-      }, id, std::string(url)));
+      [](ViewRef v, std::string u) {
+        if (v && v->browser) {
+          v->browser->GetMainFrame()->LoadURL(u);
+          v->browser->GetHost()->SendExternalBeginFrame();
+        }
+      }, v, std::string(url)));
 }
 
 void cef_view_back(void* view) {
-  View* v = static_cast<View*>(view);
-  if (!v) return;
-  uint64_t id = v->id;
-  CefPostTask(TID_UI, base::BindOnce([](uint64_t vid) {
-    ViewRef v;
-    { std::lock_guard<std::mutex> lk(g_views_mu);
-      auto it = g_views.find(vid);
-      if (it != g_views.end()) v = it->second; }
-    if (v && v->browser) v->browser->GoBack();
-  }, id));
+  View* raw = static_cast<View*>(view);
+  if (!raw) return;
+  ViewRef v(raw);
+  CefPostTask(TID_UI, base::BindOnce([](ViewRef v) {
+    if (v && v->browser) {
+      v->browser->GoBack();
+      v->browser->GetHost()->SendExternalBeginFrame();
+    }
+  }, v));
 }
 
 void cef_view_forward(void* view) {
-  View* v = static_cast<View*>(view);
-  if (!v) return;
-  uint64_t id = v->id;
-  CefPostTask(TID_UI, base::BindOnce([](uint64_t vid) {
-    ViewRef v;
-    { std::lock_guard<std::mutex> lk(g_views_mu);
-      auto it = g_views.find(vid);
-      if (it != g_views.end()) v = it->second; }
-    if (v && v->browser) v->browser->GoForward();
-  }, id));
+  View* raw = static_cast<View*>(view);
+  if (!raw) return;
+  ViewRef v(raw);
+  CefPostTask(TID_UI, base::BindOnce([](ViewRef v) {
+    if (v && v->browser) {
+      v->browser->GoForward();
+      v->browser->GetHost()->SendExternalBeginFrame();
+    }
+  }, v));
 }
 
 void cef_view_reload(void* view, int hard) {
-  View* v = static_cast<View*>(view);
-  if (!v) return;
-  uint64_t id = v->id;
-  CefPostTask(TID_UI, base::BindOnce([](uint64_t vid, int hard) {
-    ViewRef v;
-    { std::lock_guard<std::mutex> lk(g_views_mu);
-      auto it = g_views.find(vid);
-      if (it != g_views.end()) v = it->second; }
+  View* raw = static_cast<View*>(view);
+  if (!raw) return;
+  ViewRef v(raw);
+  CefPostTask(TID_UI, base::BindOnce([](ViewRef v, int hard) {
     if (!v || !v->browser) return;
     if (hard) v->browser->ReloadIgnoreCache();
     else v->browser->Reload();
-  }, id, hard));
+    v->browser->GetHost()->SendExternalBeginFrame();
+  }, v, hard));
 }
 
 void cef_view_resize(void* view, int32_t w, int32_t h) {
-  View* v = static_cast<View*>(view);
-  if (!v) return;
+  View* raw = static_cast<View*>(view);
+  if (!raw) return;
   {
-    std::lock_guard<std::mutex> lk(v->geom_mu);
-    if (v->w == w && v->h == h) return;
-    v->w = w;
-    v->h = h;
+    std::lock_guard<std::mutex> lk(raw->geom_mu);
+    if (raw->w == w && raw->h == h) return;
+    raw->w = w;
+    raw->h = h;
   }
-  uint64_t id = v->id;
-  CefPostTask(TID_UI, base::BindOnce([](uint64_t vid) {
-    ViewRef v;
-    { std::lock_guard<std::mutex> lk(g_views_mu);
-      auto it = g_views.find(vid);
-      if (it != g_views.end()) v = it->second; }
-    if (v && v->browser) v->browser->GetHost()->WasResized();
-  }, id));
+  ViewRef v(raw);
+  CefPostTask(TID_UI, base::BindOnce([](ViewRef v) {
+    if (v && v->browser) {
+      v->browser->GetHost()->WasResized();
+      v->browser->GetHost()->SendExternalBeginFrame();
+    }
+  }, v));
 }
 
 void cef_view_focus(void* view, int focus) {
-  View* v = static_cast<View*>(view);
-  if (!v) return;
-  uint64_t id = v->id;
-  CefPostTask(TID_UI, base::BindOnce([](uint64_t vid, int f) {
-    ViewRef v;
-    { std::lock_guard<std::mutex> lk(g_views_mu);
-      auto it = g_views.find(vid);
-      if (it != g_views.end()) v = it->second; }
+  View* raw = static_cast<View*>(view);
+  if (!raw) return;
+  ViewRef v(raw);
+  CefPostTask(TID_UI, base::BindOnce([](ViewRef v, int f) {
     if (v && v->browser) v->browser->GetHost()->SetFocus(f != 0);
-  }, id, focus));
+  }, v, focus));
 }
 
 void cef_view_hidden(void* view, int hidden) {
-  View* v = static_cast<View*>(view);
-  if (!v) return;
-  uint64_t id = v->id;
-  CefPostTask(TID_UI, base::BindOnce([](uint64_t vid, int h) {
-    ViewRef v;
-    { std::lock_guard<std::mutex> lk(g_views_mu);
-      auto it = g_views.find(vid);
-      if (it != g_views.end()) v = it->second; }
+  View* raw = static_cast<View*>(view);
+  if (!raw) return;
+  ViewRef v(raw);
+  CefPostTask(TID_UI, base::BindOnce([](ViewRef v, int h) {
     if (v && v->browser) v->browser->GetHost()->WasHidden(h != 0);
-  }, id, hidden));
+  }, v, hidden));
 }
 
 void cef_view_mouse(void* view, int kind, int button, int x, int y,
                     int click_count, int modifiers) {
-  View* v = static_cast<View*>(view);
-  if (!v) return;
-  uint64_t id = v->id;
+  View* raw = static_cast<View*>(view);
+  if (!raw) return;
+  ViewRef v(raw);
 
   if (kind == 0) {
     // Coalesce mouse moves to avoid saturating the CEF UI thread task queue.
@@ -834,11 +1022,7 @@ void cef_view_mouse(void* view, int kind, int button, int x, int y,
 
     if (!v->has_pending_move.exchange(true, std::memory_order_acq_rel)) {
       CefPostTask(TID_UI, base::BindOnce(
-          [](uint64_t vid) {
-            ViewRef v;
-            { std::lock_guard<std::mutex> lk(g_views_mu);
-              auto it = g_views.find(vid);
-              if (it != g_views.end()) v = it->second; }
+          [](ViewRef v) {
             if (!v || !v->browser) return;
 
             int px = v->pending_move_x.load(std::memory_order_relaxed);
@@ -852,7 +1036,8 @@ void cef_view_mouse(void* view, int kind, int button, int x, int y,
             ev.y = py;
             ev.modifiers = kmods | bmods;
             v->browser->GetHost()->SendMouseMoveEvent(ev, false);
-          }, id));
+            v->browser->GetHost()->SendExternalBeginFrame();
+          }, v));
     }
     return;
   }
@@ -871,11 +1056,7 @@ void cef_view_mouse(void* view, int kind, int button, int x, int y,
                         v->mouse_button_modifiers.load(std::memory_order_relaxed);
 
   CefPostTask(TID_UI, base::BindOnce(
-      [](uint64_t vid, int kind, int button, int x, int y, int cc, uint32_t mods) {
-        ViewRef v;
-        { std::lock_guard<std::mutex> lk(g_views_mu);
-          auto it = g_views.find(vid);
-          if (it != g_views.end()) v = it->second; }
+      [](ViewRef v, int kind, int button, int x, int y, int cc, uint32_t mods) {
         if (!v || !v->browser) return;
         CefMouseEvent ev;
         ev.x = x;
@@ -885,41 +1066,35 @@ void cef_view_mouse(void* view, int kind, int button, int x, int y,
         v->browser->GetHost()->SendMouseClickEvent(
             ev, button == 0 ? MBT_LEFT : button == 1 ? MBT_MIDDLE : MBT_RIGHT,
             up, cc);
-      }, id, kind, button, x, y, click_count, total_mods));
+        v->browser->GetHost()->SendExternalBeginFrame();
+      }, v, kind, button, x, y, click_count, total_mods));
 }
 
 void cef_view_wheel(void* view, int x, int y, int dx, int dy) {
-  View* v = static_cast<View*>(view);
-  if (!v) return;
-  uint64_t id = v->id;
+  View* raw = static_cast<View*>(view);
+  if (!raw) return;
+  ViewRef v(raw);
   uint32_t bmods = v->mouse_button_modifiers.load(std::memory_order_relaxed);
   CefPostTask(TID_UI, base::BindOnce(
-      [](uint64_t vid, int x, int y, int dx, int dy, uint32_t mods) {
-        ViewRef v;
-        { std::lock_guard<std::mutex> lk(g_views_mu);
-          auto it = g_views.find(vid);
-          if (it != g_views.end()) v = it->second; }
+      [](ViewRef v, int x, int y, int dx, int dy, uint32_t mods) {
         if (!v || !v->browser) return;
         CefMouseEvent ev;
         ev.x = x;
         ev.y = y;
         ev.modifiers = mods;
         v->browser->GetHost()->SendMouseWheelEvent(ev, dx, dy);
-      }, id, x, y, dx, dy, bmods));
+        v->browser->GetHost()->SendExternalBeginFrame();
+      }, v, x, y, dx, dy, bmods));
 }
 
 void cef_view_key(void* view, int type, int windows_key_code,
                   int native_key_code, uint32_t mods, uint16_t ch16) {
-  View* v = static_cast<View*>(view);
-  if (!v) return;
-  uint64_t id = v->id;
+  View* raw = static_cast<View*>(view);
+  if (!raw) return;
+  ViewRef v(raw);
   CefPostTask(TID_UI, base::BindOnce(
-      [](uint64_t vid, int type, int wkc, int nkc, uint32_t mods,
+      [](ViewRef v, int type, int wkc, int nkc, uint32_t mods,
          uint16_t ch16) {
-        ViewRef v;
-        { std::lock_guard<std::mutex> lk(g_views_mu);
-          auto it = g_views.find(vid);
-          if (it != g_views.end()) v = it->second; }
         if (!v || !v->browser) return;
         CefKeyEvent ev;
         ev.type = static_cast<cef_key_event_type_t>(type);
@@ -929,10 +1104,32 @@ void cef_view_key(void* view, int type, int windows_key_code,
         ev.character = ch16;
         ev.unmodified_character = ch16;
         v->browser->GetHost()->SendKeyEvent(ev);
-      }, id, type, windows_key_code, native_key_code, mods, ch16));
+        v->browser->GetHost()->SendExternalBeginFrame();
+      }, v, type, windows_key_code, native_key_code, mods, ch16));
 }
 
 #ifdef STRIP_WAYLAND_DMABUF
+static void output_handle_geometry(void*, struct wl_output*, int32_t, int32_t, int32_t, int32_t,
+                                   int32_t, const char*, const char*, int32_t) {}
+static void output_handle_mode(void*, struct wl_output*, uint32_t flags,
+                               int32_t, int32_t, int32_t refresh) {
+  if (flags & WL_OUTPUT_MODE_CURRENT) {
+    int32_t hz = (refresh + 500) / 1000;
+    if (hz >= 24 && hz <= 360) {
+      cef_set_target_frame_rate(hz);
+    }
+  }
+}
+static void output_handle_done(void*, struct wl_output*) {}
+static void output_handle_scale(void*, struct wl_output*, int32_t) {}
+
+static const struct wl_output_listener output_listener = {
+    output_handle_geometry,
+    output_handle_mode,
+    output_handle_done,
+    output_handle_scale,
+};
+
 static void registry_handle_global(void* data, struct wl_registry* registry,
                                    uint32_t name, const char* interface,
                                    uint32_t version) {
@@ -946,6 +1143,13 @@ static void registry_handle_global(void* data, struct wl_registry* registry,
   } else if (strcmp(interface, "zwp_linux_dmabuf_v1") == 0) {
     ctx->dmabuf = static_cast<struct zwp_linux_dmabuf_v1*>(
         wl_registry_bind(registry, name, &zwp_linux_dmabuf_v1_interface, std::min<uint32_t>(version, 3)));
+  } else if (strcmp(interface, "wl_output") == 0) {
+    if (!ctx->output) {
+      ctx->output = static_cast<struct wl_output*>(
+          wl_registry_bind(registry, name, &wl_output_interface, std::min<uint32_t>(version, 2)));
+      wl_proxy_set_queue(reinterpret_cast<struct wl_proxy*>(ctx->output), ctx->queue);
+      wl_output_add_listener(ctx->output, &output_listener, ctx);
+    }
   }
 #ifdef STRIP_WAYLAND_VIEWPORTER
   else if (strcmp(interface, "wp_viewporter") == 0) {
