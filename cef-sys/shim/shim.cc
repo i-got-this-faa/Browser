@@ -979,7 +979,7 @@ void cef_view_attach_wayland(void* raw_view) {
   v->subsurface = wl_subcompositor_get_subsurface(g_wl.subcompositor, v->child_surface, g_wl.parent_surface);
   wl_proxy_set_queue(reinterpret_cast<struct wl_proxy*>(v->subsurface), g_wl.queue);
 
-  wl_subsurface_set_sync(v->subsurface);
+  wl_subsurface_set_desync(v->subsurface);
   wl_subsurface_place_above(v->subsurface, g_wl.parent_surface);
   v->is_above = true;
 
