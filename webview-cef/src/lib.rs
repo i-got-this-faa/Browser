@@ -182,10 +182,38 @@ impl CefWebView {
             }
         }
     }
+
+    /// Fast-path mouse dispatch without intermediate enum allocation.
+    pub fn mouse_fast(&self, kind: i32, button: i32, x: i32, y: i32, count: i32, mods: u32) {
+        unsafe { ffi::cef_view_mouse(self.view, kind, button, x, y, count, mods as i32) };
+    }
+
+    /// Fast-path wheel dispatch without intermediate enum allocation.
+    pub fn wheel_fast(&self, x: i32, y: i32, dx: i32, dy: i32) {
+        unsafe { ffi::cef_view_wheel(self.view, x, y, dx, dy) };
+    }
+
+    /// Fast-path key dispatch without intermediate enum allocation.
+    pub fn key_fast(&self, key_type: i32, code: i32, native_code: i32, mods: u32, ch: u16) {
+        unsafe { ffi::cef_view_key(self.view, key_type, code, native_code, mods, ch) };
+    }
+
+    /// Dynamically override view frame rate (e.g. 144 FPS).
+    pub fn set_frame_rate(&self, fps: i32) {
+        unsafe { ffi::cef_view_set_frame_rate(self.view, fps) };
+    }
 }
 
 pub fn wayland_init(display: *mut std::ffi::c_void, parent_surface: *mut std::ffi::c_void) -> bool {
     unsafe { ffi::cef_wayland_init(display, parent_surface) == 0 }
+}
+
+pub fn set_target_frame_rate(fps: i32) {
+    unsafe { ffi::cef_set_target_frame_rate(fps) };
+}
+
+pub fn get_target_frame_rate() -> i32 {
+    unsafe { ffi::cef_get_target_frame_rate() }
 }
 
 impl WebView for CefWebView {
@@ -372,6 +400,14 @@ extern "C" fn sink(ev: *const ffi::CefEvent, _ud: *mut c_void) {
                 });
             } else {
                 unsafe { libc::close(ev.dmabuf_fd); }
+            }
+            browser_core::wakeslot::kick();
+        }
+        ffi::CEF_EV_CURSOR => {
+            if let Some(tx) = entry.tx.as_ref() {
+                let _ = tx.send(WebViewEvent::CursorChanged(
+                    webview_cdp::WebCursor::from_cef_type(ev.cursor_type),
+                ));
             }
             browser_core::wakeslot::kick();
         }

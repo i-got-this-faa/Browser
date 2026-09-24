@@ -108,6 +108,69 @@ pub fn key_translation(key: &str) -> (Option<String>, u32) {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum WebCursor {
+    #[default]
+    Pointer,
+    Cross,
+    Hand,
+    IBeam,
+    Wait,
+    Help,
+    EastResize,
+    NorthResize,
+    NorthEastResize,
+    NorthWestResize,
+    SouthResize,
+    SouthEastResize,
+    SouthWestResize,
+    WestResize,
+    NorthSouthResize,
+    EastWestResize,
+    ColumnResize,
+    RowResize,
+    Move,
+    VerticalText,
+    NotAllowed,
+    Grab,
+    Grabbing,
+    None,
+}
+
+impl WebCursor {
+    pub fn from_cef_type(t: i32) -> Self {
+        match t {
+            0 => WebCursor::Pointer,
+            1 => WebCursor::Cross,
+            2 => WebCursor::Hand,
+            3 => WebCursor::IBeam,
+            4 => WebCursor::Wait,
+            5 => WebCursor::Help,
+            6 => WebCursor::EastResize,
+            7 => WebCursor::NorthResize,
+            8 => WebCursor::NorthEastResize,
+            9 => WebCursor::NorthWestResize,
+            10 => WebCursor::SouthResize,
+            11 => WebCursor::SouthEastResize,
+            12 => WebCursor::SouthWestResize,
+            13 => WebCursor::WestResize,
+            14 => WebCursor::NorthSouthResize,
+            15 => WebCursor::EastWestResize,
+            16 => WebCursor::NorthEastResize,
+            17 => WebCursor::NorthWestResize,
+            18 => WebCursor::ColumnResize,
+            19 => WebCursor::RowResize,
+            27 => WebCursor::Move,
+            28 => WebCursor::VerticalText,
+            35 => WebCursor::None,
+            36 => WebCursor::NotAllowed,
+            39 => WebCursor::Grab,
+            40 => WebCursor::Grabbing,
+            _ => WebCursor::Pointer,
+        }
+    }
+}
+
 /// Events that flow from a web surface to the shell.
 #[derive(Debug, Clone)]
 pub enum WebViewEvent {
@@ -115,6 +178,7 @@ pub enum WebViewEvent {
     TitleChanged(String),
     UrlChanged(String),
     Closed,
+    CursorChanged(WebCursor),
     Dmabuf {
         fd: i32,
         width: u32,
