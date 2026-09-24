@@ -231,15 +231,47 @@ impl EngineController {
         button: CdpMouseButton,
         mods: InputMods,
     ) {
-        let _ = self.send(
-            page_id,
-            WebViewCommand::Mouse { x, y, kind, button, mods },
-        );
+        let shared = self.shared.lock().unwrap();
+        if let Some(view) = shared.views.get(&page_id) {
+            match view {
+                PageView::Cef(v) => {
+                    let k = match kind {
+                        MouseKind::Move => 0,
+                        MouseKind::Down => 1,
+                        MouseKind::Up => 2,
+                    };
+                    let b = match button {
+                        CdpMouseButton::Left => 0,
+                        CdpMouseButton::Middle => 1,
+                        CdpMouseButton::Right => 2,
+                    };
+                    let mut m = 0u32;
+                    if mods.shift { m |= 1 << 1; }
+                    if mods.ctrl { m |= 1 << 2; }
+                    if mods.alt { m |= 1 << 3; }
+                    if mods.meta { m |= 1 << 7; }
+                    v.mouse_fast(k, b, x, y, 1, m);
+                }
+                PageView::Cdp(w) => {
+                    let _ = w.send(WebViewCommand::Mouse { x, y, kind, button, mods });
+                }
+            }
+        }
     }
 
     /// Forward a scroll event at page-local coordinates.
     pub fn scroll(&self, page_id: u64, x: i32, y: i32, dx: i32, dy: i32) {
-        let _ = self.send(page_id, WebViewCommand::Scroll { x, y, dx, dy });
+        let shared = self.shared.lock().unwrap();
+        if let Some(view) = shared.views.get(&page_id) {
+            match view {
+                PageView::Cef(v) => {
+                    v.wheel_fast(x, y, dx, dy);
+                }
+                PageView::Cdp(w) => {
+                    let _ = w.send(WebViewCommand::Scroll { x, y, dx, dy });
+                }
+            }
+        }
     }
 
     /// Send printable text input to the page.
@@ -247,7 +279,52 @@ impl EngineController {
         if keys.is_empty() {
             return;
         }
-        let _ = self.send(page_id, WebViewCommand::Keys(keys));
+        let shared = self.shared.lock().unwrap();
+        if let Some(view) = shared.views.get(&page_id) {
+            match view {
+                PageView::Cef(v) => {
+                    for k in &keys {
+                        let mut m = 0u32;
+                        if k.mods.shift { m |= 1 << 1; }
+                        if k.mods.ctrl { m |= 1 << 2; }
+                        if k.mods.alt { m |= 1 << 3; }
+                        if k.mods.meta { m |= 1 << 7; }
+                        let vk = k.vk as i32;
+                        if let Some(text) = &k.text {
+                            for c in text.encode_utf16() {
+                                v.key_fast(3, vk, vk, m, c);
+                            }
+                        }
+                        v.key_fast(0, vk, vk, m, 0);
+                        v.key_fast(2, vk, vk, m, 0);
+                    }
+                }
+                PageView::Cdp(w) => {
+                    let _ = w.send(WebViewCommand::Keys(keys));
+                }
+            }
+        }
+    }
+
+    pub fn set_target_frame_rate(&self, fps: u32) {
+        if fps > 0 {
+            webview_cef::set_target_frame_rate(fps as i32);
+            let shared = self.shared.lock().unwrap();
+            for view in shared.views.values() {
+                if let PageView::Cef(v) = view {
+                    v.set_frame_rate(fps as i32);
+                }
+            }
+        }
+    }
+
+    pub fn target_frame_rate(&self) -> u32 {
+        let fps = webview_cef::get_target_frame_rate();
+        if fps > 0 {
+            fps as u32
+        } else {
+            60
+        }
     }
 
     /// Paint the page's raw BGRA frame through `f` (CEF backend only).

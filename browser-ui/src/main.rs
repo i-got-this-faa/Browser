@@ -19,12 +19,52 @@ use browser_layout::{frame_geometries, scroll_step, Viewport};
 use browser_runtime::{ops, BrowserState, LuaHost, Request};
 use engine::EngineController;
 use gpui::{
-    div, img, prelude::*, px, relative, size, App, Application, Bounds, Context, FocusHandle,
-    Focusable, ImageSource, KeyDownEvent, MouseButton, MouseDownEvent, MouseMoveEvent,
+    div, img, prelude::*, px, relative, size, App, Application, Bounds, Context, CursorStyle,
+    FocusHandle, Focusable, ImageSource, KeyDownEvent, MouseButton, MouseDownEvent, MouseMoveEvent,
     MouseUpEvent, ObjectFit, Pixels, Point, Render, RenderImage, ScrollWheelEvent, SharedString,
     Window, WindowBounds, WindowOptions,
 };
 use std::sync::Arc;
+
+#[derive(Default)]
+struct ScrollPhysics {
+    accum_x: f32,
+    accum_y: f32,
+    vel_x: f32,
+    vel_y: f32,
+    last_x: i32,
+    last_y: i32,
+}
+
+fn to_gpui_cursor(cur: webview_cdp::WebCursor) -> CursorStyle {
+    use webview_cdp::WebCursor;
+    match cur {
+        WebCursor::Pointer => CursorStyle::Arrow,
+        WebCursor::Cross => CursorStyle::Crosshair,
+        WebCursor::Hand => CursorStyle::PointingHand,
+        WebCursor::IBeam => CursorStyle::IBeam,
+        WebCursor::Wait => CursorStyle::Arrow,
+        WebCursor::Help => CursorStyle::Arrow,
+        WebCursor::EastResize => CursorStyle::ResizeRight,
+        WebCursor::NorthResize => CursorStyle::ResizeUp,
+        WebCursor::NorthEastResize => CursorStyle::ResizeUpRightDownLeft,
+        WebCursor::NorthWestResize => CursorStyle::ResizeUpLeftDownRight,
+        WebCursor::SouthResize => CursorStyle::ResizeDown,
+        WebCursor::SouthEastResize => CursorStyle::ResizeUpLeftDownRight,
+        WebCursor::SouthWestResize => CursorStyle::ResizeUpRightDownLeft,
+        WebCursor::WestResize => CursorStyle::ResizeLeft,
+        WebCursor::NorthSouthResize => CursorStyle::ResizeUpDown,
+        WebCursor::EastWestResize => CursorStyle::ResizeLeftRight,
+        WebCursor::ColumnResize => CursorStyle::ResizeColumn,
+        WebCursor::RowResize => CursorStyle::ResizeRow,
+        WebCursor::Move => CursorStyle::Arrow,
+        WebCursor::VerticalText => CursorStyle::IBeamCursorForVerticalLayout,
+        WebCursor::NotAllowed => CursorStyle::OperationNotAllowed,
+        WebCursor::Grab => CursorStyle::OpenHand,
+        WebCursor::Grabbing => CursorStyle::ClosedHand,
+        WebCursor::None => CursorStyle::None,
+    }
+}
 
 pub const DEFAULT_LUA: &str = include_str!("../assets/browser.lua");
 
@@ -150,6 +190,8 @@ struct Shell {
     /// Last hidden state pushed per page; avoids redundant SetHidden commands.
     focus_cache: HashMap<u64, bool>,
     wayland_active: bool,
+    page_cursors: HashMap<u64, CursorStyle>,
+    scroll_physics: HashMap<u64, ScrollPhysics>,
 }
 
 /// One page's render surface. `bgra` is the LIVE CPU-side frame: the pump
@@ -317,23 +359,29 @@ impl Shell {
             view_sizes: HashMap::new(),
             focus_cache: HashMap::new(),
             wayland_active,
+            page_cursors: HashMap::new(),
+            scroll_physics: HashMap::new(),
         };
         shell.reload_lua(cx);
         shell.ensure_first_page(cx);
 
         // Event-driven frame pump: awaits browser_core::wakeslot::frame_wake()
-        // instead of ticking a ~60Hz timer, so an idle shell runs zero pump
-        // iterations and burns no CPU. Producers (CEF sink, CDP reader,
-        // config watcher, control acceptor) kick the pump; GPUI notifies the
-        // window on state changes and repaints itself. A timer backs the
-        // pump only while animation is in flight (smooth scroll, toast).
+        // instead of ticking an unsynchronized 60Hz timer. When animation is in
+        // flight (smooth scroll, kinetic scrolling, toast), it ticks aligned
+        // with the monitor's native refresh rate (e.g. 144Hz = ~6.94ms) to
+        // eliminate 3:2 pulldown judder.
         cx.spawn(async move |this, cx| loop {
-            let animate = this.update(cx, |this, _| this.animation_deadline().is_some()).unwrap_or(false);
-            // 60Hz only while animation is in flight; otherwise a 1h timeout
-            // that exists purely so the race below can also be won by the
-            // wake channel (and so a lost kick can never wedge the pump).
+            let (animate, target_fps) = this
+                .update(cx, |this, _| {
+                    (
+                        this.animation_deadline().is_some(),
+                        this.target_refresh_rate().max(30),
+                    )
+                })
+                .unwrap_or((false, 60));
+            let frame_dur = std::time::Duration::from_nanos(1_000_000_000 / (target_fps as u64));
             let timer = cx.background_executor().timer(match animate {
-                true => std::time::Duration::from_millis(16),
+                true => frame_dur,
                 false => std::time::Duration::from_secs(3600),
             });
             let wake = async { let _ = browser_core::wakeslot::frame_wake().recv().await; };
@@ -357,6 +405,23 @@ impl Shell {
         }
     }
 
+    pub fn target_refresh_rate(&self) -> u32 {
+        if self.config.behavior.refresh_rate > 0 {
+            self.config.behavior.refresh_rate
+        } else {
+            let engine_fps = self.engine.target_frame_rate();
+            if engine_fps > 0 {
+                engine_fps
+            } else {
+                60
+            }
+        }
+    }
+
+    fn has_kinetic_scroll(&self) -> bool {
+        self.scroll_physics.values().any(|p| p.vel_x.abs() > 0.5 || p.vel_y.abs() > 0.5)
+    }
+
     // -- config / lua -------------------------------------------------------
 
     /// Re-parse Lua source, apply behavior, run load-time requests, and fire
@@ -371,6 +436,9 @@ impl Shell {
                     Ok(cfg) => {
                         self.state
                             .apply_behavior(cfg.behavior.gap, cfg.behavior.page_width_fraction);
+                        if cfg.behavior.refresh_rate > 0 {
+                            self.engine.set_target_frame_rate(cfg.behavior.refresh_rate);
+                        }
                         self.config = cfg;
                     }
                     Err(e) => self.toast(format!("config warning: {e}")),
@@ -659,6 +727,33 @@ impl Shell {
             dirty = true;
         }
 
+        // Kinetic scrolling physics step (smooth subpixel deceleration)
+        for (page_id, physics) in self.scroll_physics.iter_mut() {
+            if physics.vel_x.abs() > 0.5 || physics.vel_y.abs() > 0.5 {
+                physics.vel_x *= 0.88;
+                physics.vel_y *= 0.88;
+                if physics.vel_x.abs() < 0.5 { physics.vel_x = 0.0; }
+                if physics.vel_y.abs() < 0.5 { physics.vel_y = 0.0; }
+
+                physics.accum_x += physics.vel_x;
+                physics.accum_y += physics.vel_y;
+
+                let step_x = physics.accum_x.trunc() as i32;
+                if step_x != 0 {
+                    physics.accum_x -= step_x as f32;
+                }
+                let step_y = physics.accum_y.trunc() as i32;
+                if step_y != 0 {
+                    physics.accum_y -= step_y as f32;
+                }
+
+                if step_x != 0 || step_y != 0 {
+                    self.engine.scroll(*page_id, physics.last_x, physics.last_y, step_x, step_y);
+                    dirty = true;
+                }
+            }
+        }
+
         // Toast lifetime is wall-clock now: the pump only runs when kicked,
         // so frame-counting would freeze the countdown while idle.
         if let Overlay::Toast { .. } = &self.overlay {
@@ -678,7 +773,7 @@ impl Shell {
     /// while a smooth scroll is in flight, or while a toast is counting down.
     /// None means fully idle — the pump then waits for the next kick.
     fn animation_deadline(&self) -> Option<std::time::Instant> {
-        if self.scroll_target.is_some() || self.toast_deadline.is_some() {
+        if self.scroll_target.is_some() || self.toast_deadline.is_some() || self.has_kinetic_scroll() {
             Some(std::time::Instant::now())
         } else {
             None
@@ -735,6 +830,11 @@ impl Shell {
                     self.fire_hook("page_navigated", Some(payload), cx);
                     dirty = true;
                 }
+                webview_cdp::WebViewEvent::CursorChanged(cur) => {
+                    let style = to_gpui_cursor(cur);
+                    self.page_cursors.insert(page_id, style);
+                    dirty = true;
+                }
                 webview_cdp::WebViewEvent::Dmabuf {
                     fd,
                     ..
@@ -756,6 +856,8 @@ impl Shell {
                     self.retire_surface(page_id, cx);
                     self.view_sizes.remove(&page_id);
                     self.focus_cache.remove(&page_id);
+                    self.page_cursors.remove(&page_id);
+                    self.scroll_physics.remove(&page_id);
                     dirty = true;
                 }
             }
@@ -1117,8 +1219,10 @@ impl Shell {
         }
     }
 
-    fn on_mouse_move(&mut self, ev: &MouseMoveEvent, _window: &mut Window, _cx: &mut Context<Self>) {
+    fn on_mouse_move(&mut self, ev: &MouseMoveEvent, window: &mut Window, _cx: &mut Context<Self>) {
         if let Some((id, local)) = self.page_under(ev.position) {
+            let cur = self.page_cursors.get(&id).copied().unwrap_or(CursorStyle::Arrow);
+            window.set_window_cursor_style(cur);
             self.engine.mouse(
                 id,
                 f32::from(local.x) as i32,
@@ -1127,14 +1231,42 @@ impl Shell {
                 webview_cdp::MouseButton::Left,
                 cdp_mods(&ev.modifiers),
             );
+        } else {
+            window.set_window_cursor_style(CursorStyle::Arrow);
         }
     }
 
-    fn on_scroll(&mut self, ev: &ScrollWheelEvent, _window: &mut Window, _cx: &mut Context<Self>) {
+    fn on_scroll(&mut self, ev: &ScrollWheelEvent, _window: &mut Window, cx: &mut Context<Self>) {
         if let Some((id, local)) = self.page_under(ev.position) {
+            let lx = f32::from(local.x) as i32;
+            let ly = f32::from(local.y) as i32;
             let d = ev.delta.pixel_delta(px(20.0));
-            self.engine
-                .scroll(id, f32::from(local.x) as i32, f32::from(local.y) as i32, f32::from(d.x) as i32, f32::from(d.y) as i32);
+            let dx = f32::from(d.x);
+            let dy = f32::from(d.y);
+
+            let physics = self.scroll_physics.entry(id).or_default();
+            physics.last_x = lx;
+            physics.last_y = ly;
+            physics.accum_x += dx;
+            physics.accum_y += dy;
+
+            // Kinetic momentum impulse
+            physics.vel_x = (physics.vel_x * 0.4 + dx * 0.6).clamp(-120.0, 120.0);
+            physics.vel_y = (physics.vel_y * 0.4 + dy * 0.6).clamp(-120.0, 120.0);
+
+            let step_x = physics.accum_x.trunc() as i32;
+            if step_x != 0 {
+                physics.accum_x -= step_x as f32;
+            }
+            let step_y = physics.accum_y.trunc() as i32;
+            if step_y != 0 {
+                physics.accum_y -= step_y as f32;
+            }
+
+            if step_x != 0 || step_y != 0 {
+                self.engine.scroll(id, lx, ly, step_x, step_y);
+            }
+            cx.notify();
         }
     }
 }
@@ -1240,7 +1372,9 @@ impl Render for Shell {
                 truncate(&slot.page.title, 40).into()
             };
 
+            let cur = self.page_cursors.get(&id).copied().unwrap_or(CursorStyle::Arrow);
             let mut frame = div()
+                .cursor(cur)
                 .absolute()
                 .left(px(g.rel_x))
                 .top(px(g.top + self.chrome_top()))
