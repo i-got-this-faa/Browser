@@ -5,7 +5,7 @@
 //! that show up in the trace as render.geos / frame.render time.
 
 use browser_core::{Page, Strip};
-use browser_layout::{frame_geometries_scaled, Viewport};
+use browser_layout::{frame_geometries, Viewport};
 
 fn strip_with(n: usize) -> Strip {
     let mut s = Strip::new(12.0, 0.78);
@@ -27,7 +27,7 @@ fn bench(name: &str, pages: usize, iters: u32) {
     let start = std::time::Instant::now();
     let mut sink = 0.0f32;
     for _ in 0..iters {
-        let geos = frame_geometries_scaled(&strip, &vp, 500.0, 0.78, 1.0);
+        let geos = frame_geometries(&strip, &vp, 500.0, 1.0);
         // Consume a value so the work is not optimized away.
         if let Some((_, g)) = geos.last() {
             sink += g.rel_x + g.width;

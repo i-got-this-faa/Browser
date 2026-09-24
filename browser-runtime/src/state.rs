@@ -7,15 +7,10 @@ use browser_core::{Page, PageId, Strip, WorkspaceId, DEFAULT_GAP, DEFAULT_PAGE_F
 use browser_layout::{scroll_to_active, scroll_to_page, ScrollOffset, Viewport};
 use std::collections::HashMap;
 
-/// Everything known about one page: strip entry plus its webview id and the
-/// latest rendered frame (PNG bytes straight from the engine).
+/// Everything known about one page: strip entry plus its webview state.
 #[derive(Debug, Clone)]
 pub struct PageSlot {
     pub page: Page,
-    /// None until the engine has spawned a target for this page.
-    pub webview_id: Option<u64>,
-    /// Last completed frame, PNG-encoded.
-    pub frame_png: Option<Vec<u8>>,
     /// Engine has acknowledged the navigate for the initial URL.
     pub loading: bool,
 }
@@ -82,7 +77,7 @@ impl BrowserState {
         self.strip.active_page = Some(id);
         self.slots.insert(
             id,
-            PageSlot { page, webview_id: None, frame_png: None, loading: true },
+            PageSlot { page, loading: true },
         );
         self.scroll = scroll_to_active(&self.strip, vp);
         id

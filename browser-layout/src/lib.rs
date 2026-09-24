@@ -3,7 +3,7 @@
 //! Niri-inspired model: pages are first-class surfaces on an infinite
 //! horizontal strip. Opening a page never resizes another page.
 
-use browser_core::{Page, PageId, Strip, DEFAULT_GAP, DEFAULT_PAGE_FRACTION};
+use browser_core::{Page, PageId, Strip};
 
 /// Viewport geometry for one frame of layout.
 #[derive(Debug, Clone, Copy)]
@@ -73,27 +73,15 @@ impl PageGeometry {
     }
 }
 
-/// Compute per-page geometry for a frame. Pure function of state.
+/// Compute per-page geometry for a frame: a pure function of strip state.
 ///
-/// With `overview = Some((0.0, 1.0))`-style scale factors the whole strip is
-/// zoomed out around the viewport center: niri's overview mode.
+/// `scale` zooms the whole strip out around the viewport center (niri's
+/// overview mode); pages keep their relative strip positions while shrinking
+/// toward the center. 1.0 is the normal mode.
 pub fn frame_geometries(
     strip: &Strip,
     vp: &Viewport,
     scroll: ScrollOffset,
-    _fraction: f32,
-) -> Vec<(PageId, PageGeometry)> {
-    frame_geometries_scaled(strip, vp, scroll, _fraction, 1.0)
-}
-
-/// Like [`frame_geometries`] but with an explicit zoom scale (0 < scale <= 1).
-/// Pages keep their relative strip positions; everything shrinks toward the
-/// viewport center. `scale` 1.0 is the normal mode.
-pub fn frame_geometries_scaled(
-    strip: &Strip,
-    vp: &Viewport,
-    scroll: ScrollOffset,
-    _fraction: f32,
     scale: f32,
 ) -> Vec<(PageId, PageGeometry)> {
     let scale = scale.clamp(0.05, 1.0);
@@ -122,28 +110,12 @@ pub fn frame_geometries_scaled(
         .collect()
 }
 
-/// Create the first page if the strip is empty. Returns the new page.
-pub fn ensure_first_page(strip: &mut Strip, vp: &Viewport) -> Page {
-    let width = vp.page_width(strip.page_fraction);
-    let id = strip.alloc_id();
-    let page = Page::new(id, strip.active_workspace, "", 0.0, width);
-    strip.pages.push(page.clone());
-    strip.active_page = Some(page.id);
-    page
-}
-
-/// Default strip, factored for reuse.
-pub fn default_strip() -> Strip {
-    Strip::new(DEFAULT_GAP, DEFAULT_PAGE_FRACTION)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use browser_core::Page;
 
     fn strip3() -> Strip {
-        let mut s = default_strip();
+        let mut s = Strip::new(12.0, 0.78);
         for i in 0..3 {
             let id = s.alloc_id();
             s.pages.push(Page::new(id, 1, "", i as f32 * 800.0 + i as f32 * 12.0, 800.0));
@@ -167,7 +139,7 @@ mod tests {
         let s = strip3();
         let vp = Viewport { width: 1000.0, height: 800.0 };
         let scroll = scroll_to_active(&s, &vp);
-        let geos = frame_geometries(&s, &vp, scroll, s.page_fraction);
+        let geos = frame_geometries(&s, &vp, scroll, 1.0);
         let active = s.active().unwrap();
         let (_, g) = geos.iter().find(|(id, _)| *id == active.id).unwrap();
         assert!((g.focus_factor() - 1.0).abs() < 0.01);

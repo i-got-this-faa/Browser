@@ -91,16 +91,6 @@ impl Strip {
         pages
     }
 
-    /// Rightmost edge across all pages in the active workspace.
-    pub fn strip_right(&self) -> f32 {
-        self.visible().last().map(|p| p.right()).unwrap_or(0.0)
-    }
-
-    /// Leftmost edge across all pages in the active workspace.
-    pub fn strip_left(&self) -> f32 {
-        self.visible().first().map(|p| p.x).unwrap_or(0.0)
-    }
-
     /// Allocate a fresh page id.
     pub fn alloc_id(&mut self) -> PageId {
         let id = self.next_id;
@@ -302,7 +292,6 @@ mod tests {
         s.pages.push(page);
         s.active_workspace = ws;
         assert_eq!(s.visible().len(), 1);
-        assert_eq!(s.strip_right(), 100.0);
         assert!(s.remove_workspace(ws));
         assert_eq!(s.pages.len(), 2);
     }

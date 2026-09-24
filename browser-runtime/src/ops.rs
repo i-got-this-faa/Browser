@@ -33,15 +33,7 @@ pub struct Effects {
     /// added/closed/moved, workspace switched). Overlay-only requests (toast,
     /// prompt, palette) leave the scroll alone.
     pub scroll_recenter: bool,
-}
-
-impl From<()> for Effects {
-    fn from(_: ()) -> Self {
-        Self::default()
-    }
-}
-
-/// Apply a request. `submit_search` hands a non-URL prompt text back to the
+}/// Apply a request. `submit_search` hands a non-URL prompt text back to the
 /// UI, which owns the search-engine config.
 pub fn apply(state: &mut BrowserState, vp: &Viewport, req: Request, effects: &mut Effects) {
     match req {
@@ -84,9 +76,8 @@ pub fn apply(state: &mut BrowserState, vp: &Viewport, req: Request, effects: &mu
             }
         }
         Request::Back | Request::Forward => {
-            // Engine-side history: the webview applies the intent; the url
-            // event that follows updates state.
-            effects.toast = None;
+            // History is engine-side; main.rs dispatches these directly to the
+            // webview before ops sees them. Nothing to do here.
         }
         Request::PageNew | Request::PageNewBeside => {
             let id = state.add_page("", vp);

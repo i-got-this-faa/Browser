@@ -13,7 +13,7 @@ use mlua::{Lua, LuaSerdeExt, MultiValue, Table, Value};
 use serde::{Deserialize, Serialize};
 use std::sync::{Arc, Mutex};
 
-pub use bridge::{BrowserSnapshot, HostEvent, TabInfo};
+pub use bridge::{BrowserSnapshot, TabInfo};
 pub use mlua::Value as LuaValue;
 pub use state::{BrowserState, PageSlot};
 
@@ -249,6 +249,24 @@ impl LuaHost {
         Ok(())
     }
 
+    /// Push the current snapshot so scripts can read live state.
+    pub fn push_snapshot(&self, snap: &BrowserSnapshot) -> Result<()> {
+        let __t0 = std::time::Instant::now();
+        let globals = self.lua.globals();
+        let browser: Table = globals.get("browser")?;
+        let tabs = self.lua.to_value(snap.tabs.as_slice())?;
+        browser.set("tabs", tabs)?;
+        browser.set(
+            "active_page",
+            snap.tabs.iter().find(|t| t.active).map(|t| t.id),
+        )?;
+        browser.set("active_workspace", snap.active_workspace)?;
+        browser_core::perf_event!("lua.snapshot_push",
+            "tabs" => snap.tabs.len(),
+            "us" => __t0.elapsed().as_micros() as u64);
+        Ok(())
+    }
+
     /// Read-only access for callers that need serde conversions themselves.
     pub fn lua(&self) -> &Lua {
         &self.lua
@@ -256,7 +274,6 @@ impl LuaHost {
 
     /// Convert a serde JSON payload into a Lua value for hook calls.
     pub fn json_to_lua(&self, v: &serde_json::Value) -> Result<LuaValue> {
-        use mlua::LuaSerdeExt;
         self.lua.to_value(v).map_err(|e| anyhow::anyhow!(e.to_string()))
     }
 
@@ -274,24 +291,6 @@ impl LuaHost {
             }
         }
         out
-    }
-
-    /// Push the current snapshot so scripts can read live state.
-    pub fn push_snapshot(&self, snap: &BrowserSnapshot) -> Result<()> {
-        let __t0 = std::time::Instant::now();
-        let globals = self.lua.globals();
-        let browser: Table = globals.get("browser")?;
-        let tabs = self.lua.to_value(snap.tabs.as_slice())?;
-        browser.set("tabs", tabs)?;
-        browser.set(
-            "active_page",
-            snap.tabs.iter().find(|t| t.active).map(|t| t.id),
-        )?;
-        browser.set("active_workspace", snap.active_workspace)?;
-        browser_core::perf_event!("lua.snapshot_push",
-            "tabs" => snap.tabs.len(),
-            "us" => __t0.elapsed().as_micros() as u64);
-        Ok(())
     }
 
     /// Call a named config command's `run` function with an optional arg.
@@ -320,6 +319,14 @@ impl LuaHost {
         Ok(reqs)
     }
 
+    /// Evaluate an arbitrary chunk and collect requests it produces.
+    pub fn exec(&mut self, chunk: &str) -> Result<Vec<Request>> {
+        let ret: MultiValue = self.lua.load(chunk).set_name("=repl").eval()?;
+        let mut reqs = self.drain_pending();
+        reqs.extend(collect_requests(ret));
+        Ok(reqs)
+    }
+
     /// Call a lifecycle hook registered under `events[event]`.
     pub fn call_hook(&mut self, event: &str, payload: Value) -> Result<Vec<Request>> {
         let __t0 = std::time::Instant::now();
@@ -341,14 +348,6 @@ impl LuaHost {
         reqs.extend(collect_requests(ret));
         browser_core::perf_event!("lua.hook", "event" => event,
             "us" => __t0.elapsed().as_micros() as u64);
-        Ok(reqs)
-    }
-
-    /// Evaluate an arbitrary chunk and collect requests it produces.
-    pub fn exec(&mut self, chunk: &str) -> Result<Vec<Request>> {
-        let ret: MultiValue = self.lua.load(chunk).set_name("=repl").eval()?;
-        let mut reqs = self.drain_pending();
-        reqs.extend(collect_requests(ret));
         Ok(reqs)
     }
 }
@@ -402,6 +401,7 @@ fn request_with_arg(cmd: &str, arg: Option<&str>) -> Option<Request> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use mlua::LuaSerdeExt;
 
     fn host_with(src: &str) -> LuaHost {
         let mut host = LuaHost::new();
