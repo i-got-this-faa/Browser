@@ -32,8 +32,9 @@ browser.lua ──load──▶ LuaHost ──Request──▶ ops::apply ──
 | `browser-layout` | Pure viewport math: centering, smooth scroll step, per-frame geometries, focus factor. | new |
 | `browser-config` | Parse `browser.lua` into typed `Config`; hot-reload watcher; default keybindings. | new |
 | `browser-runtime` | `LuaHost` (mlua, `send`+`serialize`), `Request` catalog, `BrowserState`, ops, snapshot/events bridge. | new |
-| `webview-cdp` | `WebView` trait + first backend: CDP over raw TCP/websocket to a real Chromium. Screencast frames → PNG; input dispatch; navigation history. | new (backend targets Chromium/Helium) |
-| `browser-ui` | GPUI shell: strip renderer, prompt, palette, page bar, status bar, overlays, key router, engine pump. | new (UI framework is Zed's GPUI, Apache-2.0) |
+| `webview-cdp` | `WebView` trait + frozen CDP test harness: raw TCP/websocket to a real Chromium. Screencast frames, input dispatch, navigation history. | new (backend targets Chromium/Helium) |
+| `webview-cef` + `cef-sys` | The real content backend: CEF via a small C shim. Raw BGRA frames + damage rects; no encoded images. | new |
+| `browser-ui` | GPUI shell: strip renderer, prompt, palette, page bar, status bar, overlays, key router, engine pump, control socket, agent API. | new (UI framework is Zed's GPUI, Apache-2.0) |
 
 ## Reused vs newly implemented
 
@@ -56,10 +57,18 @@ uBlock integration). `webview-cdp` already isolates this behind the
 
 ## Frame path
 
-1. Engine pump (16 ms timer in `Shell`) drains `WebViewEvent`s.
-2. `Page.startScreencast` PNG frames land in `PageSlot.frame_png`.
-3. `render()` positions one `img(ImageSource::Render)` per page at its
-   strip geometry; PNG is decoded once to BGRA (`RenderImage` format).
+1. **Native Wayland presentation (zero-copy dmabuf, default on Wayland)**:
+   - CEF renders with `shared_texture_enabled = 1`.
+   - On Linux, CEF delivers native dmabuf file descriptors directly in `OnAcceleratedPaint`.
+   - The CEF shim binds the window's parent `wl_surface` from GPUI and creates a `wl_subsurface` for each page.
+   - Dmabufs are imported directly into Wayland via `zwp_linux_dmabuf_v1` and scaled to viewport geometry with `wp_viewporter`.
+   - Hardware composited directly by the Wayland compositor (e.g. `niri`).
+   - Zero GPU→CPU readback, zero CPU memcpys, and zero GPUI texture atlas uploads at 60 fps.
+   - Screen capture for agent APIs (`screenshot`) is performed on-demand via dmabuf mapping without per-frame overhead.
+2. **Fallback OSR path (CDP harness / non-Wayland)**:
+   - The event-driven pump wakes on engine damage and drains `WebViewEvent`s.
+   - CEF frames arrive as raw BGRA plus damage rects and are patched into a per-page stable buffer (`Surface`); the frozen CDP harness decodes PNGs instead (`STRIP_ENGINE=cdp`).
+   - `render()` publishes each visible page's buffer to a GPUI `RenderImage` once per rendered frame, positioned at its strip geometry.
 
 ## Input path
 

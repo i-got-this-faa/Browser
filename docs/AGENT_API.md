@@ -45,7 +45,7 @@ to bootstrap.
 | `overlay` | `get\|none\|prompt\|palette` | read/close the shell overlays |
 | `toast` | `text` | visible confirmation for humans watching |
 | `exec` | any typed command | `page.new_beside`, `focus.left`, `workspace.focus 3`, `overview.toggle`, `config.reload`, `app.quit`, … (`help` lists all) |
-| `key` (legacy) | `ctrl+k` | synthesize a real keystroke through the shell's key routing |
+| `key` (shell) | `ctrl+k` | synthesize a real keystroke through the shell's key routing |
 | `quit` | – | close the browser |
 
 **Selector** `[sel]`: a numeric page id, `active`, or a case-insensitive
