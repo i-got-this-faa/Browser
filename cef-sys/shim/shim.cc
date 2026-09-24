@@ -218,6 +218,12 @@ struct View : public CefBaseRefCounted {
   float dsf = 1.0f;
   std::mutex geom_mu;
 
+  std::atomic<bool> has_pending_move{false};
+  std::atomic<int32_t> pending_move_x{0};
+  std::atomic<int32_t> pending_move_y{0};
+  std::atomic<uint32_t> pending_move_mods{0};
+  std::atomic<uint32_t> mouse_button_modifiers{0};
+
 #ifdef STRIP_WAYLAND_DMABUF
   struct wl_surface* child_surface = nullptr;
   struct wl_subsurface* subsurface = nullptr;
@@ -815,12 +821,57 @@ void cef_view_hidden(void* view, int hidden) {
 }
 
 void cef_view_mouse(void* view, int kind, int button, int x, int y,
-                    int click_count) {
+                    int click_count, int modifiers) {
   View* v = static_cast<View*>(view);
   if (!v) return;
   uint64_t id = v->id;
+
+  if (kind == 0) {
+    // Coalesce mouse moves to avoid saturating the CEF UI thread task queue.
+    v->pending_move_x.store(x, std::memory_order_relaxed);
+    v->pending_move_y.store(y, std::memory_order_relaxed);
+    v->pending_move_mods.store(static_cast<uint32_t>(modifiers), std::memory_order_relaxed);
+
+    if (!v->has_pending_move.exchange(true, std::memory_order_acq_rel)) {
+      CefPostTask(TID_UI, base::BindOnce(
+          [](uint64_t vid) {
+            ViewRef v;
+            { std::lock_guard<std::mutex> lk(g_views_mu);
+              auto it = g_views.find(vid);
+              if (it != g_views.end()) v = it->second; }
+            if (!v || !v->browser) return;
+
+            int px = v->pending_move_x.load(std::memory_order_relaxed);
+            int py = v->pending_move_y.load(std::memory_order_relaxed);
+            uint32_t kmods = v->pending_move_mods.load(std::memory_order_relaxed);
+            uint32_t bmods = v->mouse_button_modifiers.load(std::memory_order_relaxed);
+            v->has_pending_move.store(false, std::memory_order_release);
+
+            CefMouseEvent ev;
+            ev.x = px;
+            ev.y = py;
+            ev.modifiers = kmods | bmods;
+            v->browser->GetHost()->SendMouseMoveEvent(ev, false);
+          }, id));
+    }
+    return;
+  }
+
+  // Mouse down / up: update button tracking and dispatch immediately.
+  uint32_t btn_flag = (button == 0) ? EVENTFLAG_LEFT_MOUSE_BUTTON
+                    : (button == 1) ? EVENTFLAG_MIDDLE_MOUSE_BUTTON
+                    : EVENTFLAG_RIGHT_MOUSE_BUTTON;
+  if (kind == 1) {
+    v->mouse_button_modifiers.fetch_or(btn_flag, std::memory_order_relaxed);
+  } else if (kind == 2) {
+    v->mouse_button_modifiers.fetch_and(~btn_flag, std::memory_order_relaxed);
+  }
+
+  uint32_t total_mods = static_cast<uint32_t>(modifiers) |
+                        v->mouse_button_modifiers.load(std::memory_order_relaxed);
+
   CefPostTask(TID_UI, base::BindOnce(
-      [](uint64_t vid, int kind, int button, int x, int y, int cc) {
+      [](uint64_t vid, int kind, int button, int x, int y, int cc, uint32_t mods) {
         ViewRef v;
         { std::lock_guard<std::mutex> lk(g_views_mu);
           auto it = g_views.find(vid);
@@ -829,25 +880,21 @@ void cef_view_mouse(void* view, int kind, int button, int x, int y,
         CefMouseEvent ev;
         ev.x = x;
         ev.y = y;
-        ev.modifiers = 0;
-        auto host = v->browser->GetHost();
-        if (kind == 0) {
-          host->SendMouseMoveEvent(ev, false);
-        } else if (kind == 1 || kind == 2) {
-          bool up = kind == 2;
-          host->SendMouseClickEvent(
-              ev, button == 0 ? MBT_LEFT : button == 1 ? MBT_MIDDLE : MBT_RIGHT,
-              up, cc);
-        }
-      }, id, kind, button, x, y, click_count));
+        ev.modifiers = mods;
+        bool up = (kind == 2);
+        v->browser->GetHost()->SendMouseClickEvent(
+            ev, button == 0 ? MBT_LEFT : button == 1 ? MBT_MIDDLE : MBT_RIGHT,
+            up, cc);
+      }, id, kind, button, x, y, click_count, total_mods));
 }
 
 void cef_view_wheel(void* view, int x, int y, int dx, int dy) {
   View* v = static_cast<View*>(view);
   if (!v) return;
   uint64_t id = v->id;
+  uint32_t bmods = v->mouse_button_modifiers.load(std::memory_order_relaxed);
   CefPostTask(TID_UI, base::BindOnce(
-      [](uint64_t vid, int x, int y, int dx, int dy) {
+      [](uint64_t vid, int x, int y, int dx, int dy, uint32_t mods) {
         ViewRef v;
         { std::lock_guard<std::mutex> lk(g_views_mu);
           auto it = g_views.find(vid);
@@ -856,9 +903,9 @@ void cef_view_wheel(void* view, int x, int y, int dx, int dy) {
         CefMouseEvent ev;
         ev.x = x;
         ev.y = y;
-        ev.modifiers = 0;
+        ev.modifiers = mods;
         v->browser->GetHost()->SendMouseWheelEvent(ev, dx, dy);
-      }, id, x, y, dx, dy));
+      }, id, x, y, dx, dy, bmods));
 }
 
 void cef_view_key(void* view, int type, int windows_key_code,

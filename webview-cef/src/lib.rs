@@ -213,7 +213,7 @@ impl WebView for CefWebView {
             WebViewCommand::SetHidden(h) => unsafe {
                 ffi::cef_view_hidden(self.view, h as c_int);
             },
-            WebViewCommand::Mouse { x, y, kind, button, mods: _ } => {
+            WebViewCommand::Mouse { x, y, kind, button, mods } => {
                 let k = match kind {
                     MouseKind::Move => 0,
                     MouseKind::Down => 1,
@@ -224,7 +224,12 @@ impl WebView for CefWebView {
                     MouseButton::Middle => 1,
                     MouseButton::Right => 2,
                 };
-                unsafe { ffi::cef_view_mouse(self.view, k, b, x, y, 1) };
+                let mut m = 0i32;
+                if mods.shift { m |= 1 << 1; }
+                if mods.ctrl { m |= 1 << 2; }
+                if mods.alt { m |= 1 << 3; }
+                if mods.meta { m |= 1 << 7; }
+                unsafe { ffi::cef_view_mouse(self.view, k, b, x, y, 1, m) };
             }
             WebViewCommand::Scroll { x, y, dx, dy } => unsafe {
                 ffi::cef_view_wheel(self.view, x, y, dx, dy);

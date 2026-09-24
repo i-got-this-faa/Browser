@@ -88,7 +88,7 @@ void cef_view_hidden(void *view, int hidden);
 
 // Mouse: kind 0=move 1=down 2=up; button 0=left 1=middle 2=right.
 void cef_view_mouse(void *view, int kind, int button, int x, int y,
-                    int click_count);
+                    int click_count, int modifiers);
 // Wheel in pixels.
 void cef_view_wheel(void *view, int x, int y, int dx, int dy);
 

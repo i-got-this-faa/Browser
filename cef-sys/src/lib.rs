@@ -72,6 +72,7 @@ unsafe extern "C" {
         x: c_int,
         y: c_int,
         click_count: c_int,
+        modifiers: c_int,
     );
     pub fn cef_view_wheel(view: *mut c_void, x: c_int, y: c_int, dx: c_int, dy: c_int);
     /// type: cef_key_event_type_t (0=RAWKEYDOWN 1=KEYDOWN 2=KEYUP 3=CHAR);
