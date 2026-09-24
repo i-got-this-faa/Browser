@@ -710,13 +710,16 @@ impl Shell {
                     // (per visible page, once per rendered frame): publishing
                     // here cloned the full 4MB buffer per damage event even
                     // when several landed within one rendered frame.
+                    let was_loading = self.state.slot(page_id).map(|s| s.loading).unwrap_or(false);
                     if let Some(slot) = self.state.slot_mut(page_id) {
                         slot.loading = false;
                     }
                     perf_event!("frame.paint",
                         "page" => page_id,
                         "us" => __t0.elapsed().as_micros() as u64);
-                    dirty = true;
+                    if !self.wayland_active || was_loading {
+                        dirty = true;
+                    }
                 }
                 webview_cdp::WebViewEvent::TitleChanged(title) => {
                     perf_event!("event.title", "page" => page_id);
