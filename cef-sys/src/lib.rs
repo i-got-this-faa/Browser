@@ -16,6 +16,7 @@ pub const CEF_EV_TITLE: u32 = 3;
 pub const CEF_EV_URL: u32 = 4;
 pub const CEF_EV_LOADING: u32 = 5;
 pub const CEF_EV_CLOSED: u32 = 6;
+pub const CEF_EV_DMABUF: u32 = 7;
 
 #[repr(C)]
 #[derive(Copy, Clone)]
@@ -28,6 +29,11 @@ pub struct CefEvent {
     pub nrects: c_int,
     pub loading: c_int,
     pub str_: *const c_char,
+    pub dmabuf_fd: c_int,
+    pub stride: u32,
+    pub offset: u64,
+    pub modifier: u64,
+    pub drm_format: u32,
 }
 
 unsafe extern "C" {
@@ -78,4 +84,23 @@ unsafe extern "C" {
         mods: u32,
         ch16: u16,
     );
+
+    pub fn cef_wayland_init(display: *mut c_void, parent_surface: *mut c_void) -> c_int;
+    pub fn cef_view_attach_wayland(view: *mut c_void);
+    pub fn cef_view_set_geometry(
+        view: *mut c_void,
+        x: i32,
+        y: i32,
+        w: i32,
+        h: i32,
+        visible: c_int,
+        has_overlay: c_int,
+    );
+    pub fn cef_view_get_screenshot(
+        view: *mut c_void,
+        out_buf: *mut *mut u8,
+        out_w: *mut i32,
+        out_h: *mut i32,
+        out_size: *mut usize,
+    ) -> c_int;
 }

@@ -5,6 +5,7 @@
 #define STRIP_CEF_SHIM_H
 
 #include <stdint.h>
+#include <stddef.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -18,6 +19,7 @@ enum {
   CEF_EV_URL = 4,
   CEF_EV_LOADING = 5,
   CEF_EV_CLOSED = 6,
+  CEF_EV_DMABUF = 7,      // native dmabuf frame delivered
 };
 
 typedef struct {
@@ -32,6 +34,12 @@ typedef struct {
   int32_t loading;          // CEF_EV_LOADING: 1 = loading, 0 = done
   // CEF_EV_TITLE / CEF_EV_URL: UTF-8, valid only during the sink call.
   const char *str;
+  // CEF_EV_DMABUF:
+  int32_t dmabuf_fd;
+  uint32_t stride;
+  uint64_t offset;
+  uint64_t modifier;
+  uint32_t drm_format;
 } cef_event_t;
 
 typedef void (*cef_sink_fn)(const cef_event_t *ev, void *ud);
@@ -88,6 +96,13 @@ void cef_view_wheel(void *view, int x, int y, int dx, int dy);
 // 3=CHAR). mods = CEF EVENTFLAG bits verbatim (SHIFT=2 CTRL=4 ALT=8 META=128).
 void cef_view_key(void *view, int type, int windows_key_code,
                   int native_key_code, uint32_t mods, uint16_t ch16);
+
+// Native Wayland subsurface presentation (zero-copy dmabuf import)
+int cef_wayland_init(void *wl_display, void *wl_parent_surface);
+void cef_view_attach_wayland(void *view);
+void cef_view_set_geometry(void *view, int32_t x, int32_t y, int32_t w, int32_t h,
+                           int32_t visible, int32_t has_overlay);
+int cef_view_get_screenshot(void *view, uint8_t **out_buf, int32_t *out_w, int32_t *out_h, size_t *out_size);
 
 #ifdef __cplusplus
 }

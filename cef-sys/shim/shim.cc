@@ -21,7 +21,40 @@
 #include <map>
 #include <mutex>
 #include <string>
+#include <sys/mman.h>
+#include <unistd.h>
 #include <vector>
+
+#ifdef STRIP_WAYLAND_DMABUF
+#include <wayland-client.h>
+#include "linux-dmabuf-v1-client-protocol.h"
+#ifdef STRIP_WAYLAND_VIEWPORTER
+#include "viewporter-client-protocol.h"
+#endif
+
+extern "C" {
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wattributes"
+#include "linux-dmabuf-v1-protocol.c"
+#ifdef STRIP_WAYLAND_VIEWPORTER
+#include "viewporter-protocol.c"
+#endif
+#pragma GCC diagnostic pop
+}
+
+struct WlContext {
+  struct wl_display* display = nullptr;
+  struct wl_surface* parent_surface = nullptr;
+  struct wl_event_queue* queue = nullptr;
+  struct wl_compositor* compositor = nullptr;
+  struct wl_subcompositor* subcompositor = nullptr;
+  struct zwp_linux_dmabuf_v1* dmabuf = nullptr;
+  struct wp_viewporter* viewporter = nullptr;
+  std::mutex mu;
+};
+
+static WlContext g_wl;
+#endif
 
 #include "include/cef_app.h"
 #include "include/cef_browser.h"
@@ -84,16 +117,31 @@ struct FrameBuffer {
   Rect damage;
   std::mutex mu;
 
-  void store(const uint8_t* src, int32_t sw, int32_t sh, const Rect& dirty) {
+  // Copy one CEF frame in. Returns what Rust must repaint next time it
+  // drains: full=true (nrects==0 on the wire) or the accumulated union rect.
+  // A size change (or a frame with no dirty rect) requires a FULL copy of the
+  // new buffer — reporting only the incoming frame's rect would leave every
+  // other pixel of the freshly allocated buffer zeroed (black-hole paint).
+  struct StoreResult {
+    bool full;
+    Rect rects;
+  };
+  StoreResult store(const uint8_t* src, int32_t sw, int32_t sh,
+                    const Rect& dirty) {
     std::lock_guard<std::mutex> lk(mu);
+    bool full = false;
     if (sw != w || sh != h) {
       // Size change: reallocation (the ONLY one), then full damage.
       w = sw; h = sh;
       px.assign(size_t(sw) * size_t(sh) * 4, 0);
-      damage = Rect();
-      full_pending = true;
+      full = true;
     }
-    if (!dirty.empty()) {
+    if (full || dirty.empty()) {
+      if (!full) full = true;  // empty dirty == CEF repainted everything
+      memcpy(px.data(), src, px.size());
+      // Full repaint: the accumulated union is meaningless now.
+      damage = Rect{0, 0, w, h};
+    } else {
       int32_t x0 = std::max(0, dirty.x);
       int32_t y0 = std::max(0, dirty.y);
       int32_t x1 = std::min(w, dirty.x + dirty.w);
@@ -106,17 +154,13 @@ struct FrameBuffer {
           memcpy(d, s, rowbytes);
         }
       }
-      // Union must reflect this frame's damage even across drains: keep
-      // growing until Rust takes it (under the same lock, so no race).
+      // MERGE into the union Rust has not drained yet: overwriting here used
+      // to drop the rects of frames that arrived between two drains, so the
+      // shell patched only the newest rect and stale pixels stayed on screen.
       damage.unite(dirty);
-    } else {
-      memcpy(px.data(), src, px.size());
-      damage = Rect();
-      full_pending = true;
     }
+    return {full, damage};
   }
-
-  bool full_pending = false;
 };
 
 // ---------------------------------------------------------------------------
@@ -137,7 +181,7 @@ void emit(uint32_t kind, uint64_t view_id, const char* str) {
 }
 
 void emit_frame(uint64_t id, bool popup, int32_t w, int32_t h,
-                const Rect& dmg) {
+                const Rect& dmg, bool full) {
   cef_sink_fn fn = g_sink.load(std::memory_order_acquire);
   if (!fn) return;
   cef_event_t ev{};
@@ -145,9 +189,13 @@ void emit_frame(uint64_t id, bool popup, int32_t w, int32_t h,
   ev.view_id = id;
   ev.w = w;
   ev.h = h;
-  ev.nrects = 1;
-  ev.rects[0][0] = dmg.x; ev.rects[0][1] = dmg.y;
-  ev.rects[0][2] = dmg.w; ev.rects[0][3] = dmg.h;
+  if (full) {
+    ev.nrects = 0;  // documented convention: nrects == 0 => full frame
+  } else {
+    ev.nrects = 1;
+    ev.rects[0][0] = dmg.x; ev.rects[0][1] = dmg.y;
+    ev.rects[0][2] = dmg.w; ev.rects[0][3] = dmg.h;
+  }
   fn(&ev, g_sink_ud.load(std::memory_order_relaxed));
 }
 
@@ -169,6 +217,49 @@ struct View : public CefBaseRefCounted {
   int32_t w = 800, h = 600;
   float dsf = 1.0f;
   std::mutex geom_mu;
+
+#ifdef STRIP_WAYLAND_DMABUF
+  struct wl_surface* child_surface = nullptr;
+  struct wl_subsurface* subsurface = nullptr;
+  struct wp_viewport* viewport = nullptr;
+  struct wl_buffer* current_buffer = nullptr;
+  int32_t last_x = 0, last_y = 0, last_w = 0, last_h = 0;
+  bool is_visible = true;
+  bool is_above = false;
+  int last_fd = -1;
+  uint64_t last_size = 0;
+  uint32_t last_stride = 0;
+  uint64_t last_offset = 0;
+  int32_t last_buf_w = 0;
+  int32_t last_buf_h = 0;
+  std::mutex wayland_mu;
+
+  ~View() override {
+    std::lock_guard<std::mutex> lk(wayland_mu);
+    if (last_fd >= 0) {
+      close(last_fd);
+      last_fd = -1;
+    }
+    if (current_buffer) {
+      wl_buffer_destroy(current_buffer);
+      current_buffer = nullptr;
+    }
+#ifdef STRIP_WAYLAND_VIEWPORTER
+    if (viewport) {
+      wp_viewport_destroy(viewport);
+      viewport = nullptr;
+    }
+#endif
+    if (subsurface) {
+      wl_subsurface_destroy(subsurface);
+      subsurface = nullptr;
+    }
+    if (child_surface) {
+      wl_surface_destroy(child_surface);
+      child_surface = nullptr;
+    }
+  }
+#endif
 
   IMPLEMENT_REFCOUNTING(View);
 };
@@ -209,8 +300,7 @@ struct RenderHandler : public CefRenderHandler {
       std::lock_guard<std::mutex> lk(view->popup.mu);
       view->popup.h = 0;  // not visible; buffer contents retained
       view->popup.damage = Rect();
-      view->popup.full_pending = false;
-      emit_frame(view->id, true, 0, 0, Rect());  // w==0 => hide popup layer
+      emit_frame(view->id, true, 0, 0, Rect(), false);  // w==0 => hide popup layer
     }
   }
 
@@ -227,9 +317,9 @@ struct RenderHandler : public CefRenderHandler {
     for (const CefRect& r : dirtyRects) dirty.unite(r);
 
     if (type == PET_VIEW) {
-      view->frame.store(static_cast<const uint8_t*>(buffer), width, height,
-                        dirty);
-      emit_frame(view->id, false, width, height, dirty);
+      auto r = view->frame.store(static_cast<const uint8_t*>(buffer), width,
+                                 height, dirty);
+      emit_frame(view->id, false, width, height, r.rects, r.full);
     } else {
       int32_t px = 0, py = 0;
       {
@@ -237,19 +327,108 @@ struct RenderHandler : public CefRenderHandler {
         px = view->popup_geom.x;
         py = view->popup_geom.y;
       }
-      view->popup.store(static_cast<const uint8_t*>(buffer), width, height,
-                        dirty);
-      Rect vd = dirty;
-      vd.x += px; vd.y += py;
-      emit_frame(view->id, true, width, height, vd);
+      auto r = view->popup.store(static_cast<const uint8_t*>(buffer), width,
+                                 height, dirty);
+      Rect vd = r.rects;
+      if (!r.full) {
+        vd.x += px; vd.y += py;  // popup buffer coords -> view coords
+      }
+      emit_frame(view->id, true, width, height, vd, r.full);
     }
   }
 
-  void OnAcceleratedPaint(CefRefPtr<CefBrowser>, PaintElementType,
-                          const RectList&,
-                          const CefAcceleratedPaintInfo&) override {
-    // Not used: shared_texture_enabled is false. Phase 2 (dmabuf import)
-    // lands here — CEF delivers native-pixel fds on Linux.
+  void OnAcceleratedPaint(CefRefPtr<CefBrowser> browser, PaintElementType type,
+                          const RectList& dirtyRects,
+                          const CefAcceleratedPaintInfo& info) override {
+    if (type != PET_VIEW || info.plane_count < 1) return;
+
+#ifdef STRIP_WAYLAND_DMABUF
+    {
+      std::lock_guard<std::mutex> lk_wl(g_wl.mu);
+      if (g_wl.dmabuf && view->child_surface) {
+        std::lock_guard<std::mutex> lk(view->wayland_mu);
+
+        uint64_t plane_size = info.planes[0].size;
+        if (plane_size == 0 && info.planes[0].fd >= 0) {
+          off_t sz = lseek(info.planes[0].fd, 0, SEEK_END);
+          if (sz > 0) plane_size = static_cast<uint64_t>(sz);
+        }
+
+        uint32_t buf_w = 0;
+        uint32_t buf_h = 0;
+
+        if (info.extra.coded_size.width > 0 && info.extra.coded_size.height > 0) {
+          buf_w = static_cast<uint32_t>(info.extra.coded_size.width);
+          buf_h = static_cast<uint32_t>(info.extra.coded_size.height);
+        } else if (info.extra.visible_rect.width > 0 && info.extra.visible_rect.height > 0) {
+          buf_w = static_cast<uint32_t>(info.extra.visible_rect.width);
+          buf_h = static_cast<uint32_t>(info.extra.visible_rect.height);
+        } else {
+          buf_w = view->w > 0 ? view->w : 1;
+          buf_h = view->h > 0 ? view->h : 1;
+        }
+
+        if (info.planes[0].stride > 0 && plane_size > info.planes[0].offset) {
+          uint32_t max_lines = static_cast<uint32_t>((plane_size - info.planes[0].offset) / info.planes[0].stride);
+          if (buf_h > max_lines && max_lines > 0) {
+            buf_h = max_lines;
+          }
+          uint32_t max_cols = info.planes[0].stride / 4;
+          if (buf_w > max_cols && max_cols > 0) {
+            buf_w = max_cols;
+          }
+        }
+
+        struct zwp_linux_buffer_params_v1* params =
+            zwp_linux_dmabuf_v1_create_params(g_wl.dmabuf);
+        wl_proxy_set_queue(reinterpret_cast<struct wl_proxy*>(params), g_wl.queue);
+
+        uint32_t mod_hi = static_cast<uint32_t>((info.modifier >> 32) & 0xFFFFFFFF);
+        uint32_t mod_lo = static_cast<uint32_t>(info.modifier & 0xFFFFFFFF);
+
+        zwp_linux_buffer_params_v1_add(params, info.planes[0].fd, 0,
+                                       static_cast<uint32_t>(info.planes[0].offset),
+                                       info.planes[0].stride,
+                                       mod_hi, mod_lo);
+
+        uint32_t drm_format = 0x34325241; // DRM_FORMAT_ARGB8888
+        struct wl_buffer* buf = zwp_linux_buffer_params_v1_create_immed(
+            params, buf_w, buf_h, drm_format, 0);
+        zwp_linux_buffer_params_v1_destroy(params);
+
+        if (buf) {
+          wl_proxy_set_queue(reinterpret_cast<struct wl_proxy*>(buf), g_wl.queue);
+          wl_surface_attach(view->child_surface, buf, 0, 0);
+          wl_surface_damage(view->child_surface, 0, 0, INT32_MAX, INT32_MAX);
+#ifdef STRIP_WAYLAND_VIEWPORTER
+          if (view->viewport && view->w > 0 && view->h > 0) {
+            wp_viewport_set_destination(view->viewport, view->w, view->h);
+          }
+#endif
+          wl_surface_commit(view->child_surface);
+
+          if (view->current_buffer) {
+            wl_buffer_destroy(view->current_buffer);
+          }
+          view->current_buffer = buf;
+
+          if (view->last_fd >= 0) close(view->last_fd);
+          view->last_fd = dup(info.planes[0].fd);
+          view->last_size = plane_size;
+          view->last_stride = info.planes[0].stride;
+          view->last_offset = info.planes[0].offset;
+          view->last_buf_w = static_cast<int32_t>(buf_w);
+          view->last_buf_h = static_cast<int32_t>(buf_h);
+        }
+
+        wl_display_flush(g_wl.display);
+        wl_display_dispatch_queue_pending(g_wl.display, g_wl.queue);
+
+        emit_frame(view->id, false, buf_w, buf_h, Rect{0, 0, static_cast<int32_t>(buf_w), static_cast<int32_t>(buf_h)}, true);
+        return;
+      }
+    }
+#endif
   }
 
   ViewRef view;
@@ -453,6 +632,7 @@ void* cef_view_create(uint64_t id, const char* url, int32_t w, int32_t h) {
 
   CefWindowInfo info;
   info.SetAsWindowless(cef_window_handle_t());
+  info.shared_texture_enabled = 1;
   CefBrowserSettings bs;
   bs.windowless_frame_rate = 60;
 
@@ -464,6 +644,7 @@ void* cef_view_create(uint64_t id, const char* url, int32_t w, int32_t h) {
       },
       client, info, bs, std::string(url)));
 
+  cef_view_attach_wayland(v.get());
   // Ownership: g_views holds the only view ref for Rust's purposes; the raw
   // pointer stays valid until cef_view_destroy erases it from the map.
   return v.get();
@@ -703,3 +884,204 @@ void cef_view_key(void* view, int type, int windows_key_code,
         v->browser->GetHost()->SendKeyEvent(ev);
       }, id, type, windows_key_code, native_key_code, mods, ch16));
 }
+
+#ifdef STRIP_WAYLAND_DMABUF
+static void registry_handle_global(void* data, struct wl_registry* registry,
+                                   uint32_t name, const char* interface,
+                                   uint32_t version) {
+  WlContext* ctx = static_cast<WlContext*>(data);
+  if (strcmp(interface, "wl_compositor") == 0) {
+    ctx->compositor = static_cast<struct wl_compositor*>(
+        wl_registry_bind(registry, name, &wl_compositor_interface, std::min<uint32_t>(version, 4)));
+  } else if (strcmp(interface, "wl_subcompositor") == 0) {
+    ctx->subcompositor = static_cast<struct wl_subcompositor*>(
+        wl_registry_bind(registry, name, &wl_subcompositor_interface, 1));
+  } else if (strcmp(interface, "zwp_linux_dmabuf_v1") == 0) {
+    ctx->dmabuf = static_cast<struct zwp_linux_dmabuf_v1*>(
+        wl_registry_bind(registry, name, &zwp_linux_dmabuf_v1_interface, std::min<uint32_t>(version, 3)));
+  }
+#ifdef STRIP_WAYLAND_VIEWPORTER
+  else if (strcmp(interface, "wp_viewporter") == 0) {
+    ctx->viewporter = static_cast<struct wp_viewporter*>(
+        wl_registry_bind(registry, name, &wp_viewporter_interface, 1));
+  }
+#endif
+}
+
+static void registry_handle_global_remove(void*, struct wl_registry*, uint32_t) {}
+
+static const struct wl_registry_listener registry_listener = {
+    registry_handle_global,
+    registry_handle_global_remove,
+};
+#endif
+
+int cef_wayland_init(void* display, void* parent_surface) {
+#ifdef STRIP_WAYLAND_DMABUF
+  std::lock_guard<std::mutex> lk(g_wl.mu);
+  g_wl.display = static_cast<struct wl_display*>(display);
+  g_wl.parent_surface = static_cast<struct wl_surface*>(parent_surface);
+  if (!g_wl.display || !g_wl.parent_surface) return -1;
+
+  g_wl.queue = wl_display_create_queue(g_wl.display);
+  if (!g_wl.queue) return -1;
+
+  struct wl_display* display_wrapper = static_cast<struct wl_display*>(
+      wl_proxy_create_wrapper(g_wl.display));
+  wl_proxy_set_queue(reinterpret_cast<struct wl_proxy*>(display_wrapper), g_wl.queue);
+
+  struct wl_registry* registry = wl_display_get_registry(display_wrapper);
+  wl_proxy_wrapper_destroy(display_wrapper);
+
+  wl_registry_add_listener(registry, &registry_listener, &g_wl);
+  wl_display_roundtrip_queue(g_wl.display, g_wl.queue);
+  wl_display_roundtrip_queue(g_wl.display, g_wl.queue);
+
+  if (!g_wl.compositor || !g_wl.subcompositor || !g_wl.dmabuf) {
+    fprintf(stderr, "[CEF SHIM] Missing Wayland protocols: comp=%p subcomp=%p dmabuf=%p\n",
+            g_wl.compositor, g_wl.subcompositor, g_wl.dmabuf);
+    return -1;
+  }
+  fprintf(stderr, "[CEF SHIM] Wayland dmabuf subsurface initialized successfully!\n");
+
+  {
+    std::lock_guard<std::mutex> lk_views(g_views_mu);
+    for (auto& pair : g_views) {
+      cef_view_attach_wayland(pair.second.get());
+    }
+  }
+
+  return 0;
+#else
+  return -1;
+#endif
+}
+
+void cef_view_attach_wayland(void* raw_view) {
+#ifdef STRIP_WAYLAND_DMABUF
+  View* v = static_cast<View*>(raw_view);
+  if (!v) return;
+
+  std::lock_guard<std::mutex> lk_wl(g_wl.mu);
+  if (!g_wl.display || !g_wl.compositor || !g_wl.subcompositor || !g_wl.parent_surface) return;
+
+  std::lock_guard<std::mutex> lk(v->wayland_mu);
+  if (v->child_surface) return;
+
+  v->child_surface = wl_compositor_create_surface(g_wl.compositor);
+  wl_proxy_set_queue(reinterpret_cast<struct wl_proxy*>(v->child_surface), g_wl.queue);
+
+  struct wl_region* empty_region = wl_compositor_create_region(g_wl.compositor);
+  wl_proxy_set_queue(reinterpret_cast<struct wl_proxy*>(empty_region), g_wl.queue);
+  wl_surface_set_input_region(v->child_surface, empty_region);
+  wl_region_destroy(empty_region);
+
+  v->subsurface = wl_subcompositor_get_subsurface(g_wl.subcompositor, v->child_surface, g_wl.parent_surface);
+  wl_proxy_set_queue(reinterpret_cast<struct wl_proxy*>(v->subsurface), g_wl.queue);
+
+  wl_subsurface_set_sync(v->subsurface);
+  wl_subsurface_place_above(v->subsurface, g_wl.parent_surface);
+  v->is_above = true;
+
+#ifdef STRIP_WAYLAND_VIEWPORTER
+  if (g_wl.viewporter) {
+    v->viewport = wp_viewporter_get_viewport(g_wl.viewporter, v->child_surface);
+    wl_proxy_set_queue(reinterpret_cast<struct wl_proxy*>(v->viewport), g_wl.queue);
+  }
+#endif
+
+  wl_surface_commit(v->child_surface);
+  wl_display_dispatch_queue_pending(g_wl.display, g_wl.queue);
+#endif
+}
+
+void cef_view_set_geometry(void* raw_view, int32_t x, int32_t y, int32_t w, int32_t h,
+                           int32_t visible, int32_t has_overlay) {
+#ifdef STRIP_WAYLAND_DMABUF
+  View* v = static_cast<View*>(raw_view);
+  if (!v) return;
+
+  std::lock_guard<std::mutex> lk_wl(g_wl.mu);
+  if (!g_wl.display) return;
+
+  std::lock_guard<std::mutex> lk(v->wayland_mu);
+  if (!v->subsurface || !v->child_surface) return;
+
+  if (!visible) {
+    if (v->is_visible) {
+      v->is_visible = false;
+      wl_surface_attach(v->child_surface, nullptr, 0, 0);
+      wl_surface_commit(v->child_surface);
+      wl_display_dispatch_queue_pending(g_wl.display, g_wl.queue);
+    }
+    return;
+  }
+
+  v->is_visible = true;
+
+  if (has_overlay) {
+    if (v->is_above) {
+      wl_subsurface_place_below(v->subsurface, g_wl.parent_surface);
+      v->is_above = false;
+    }
+  } else {
+    if (!v->is_above) {
+      wl_subsurface_place_above(v->subsurface, g_wl.parent_surface);
+      v->is_above = true;
+    }
+  }
+
+  if (v->last_x != x || v->last_y != y) {
+    wl_subsurface_set_position(v->subsurface, x, y);
+    v->last_x = x;
+    v->last_y = y;
+  }
+
+#ifdef STRIP_WAYLAND_VIEWPORTER
+  if (v->viewport && (v->last_w != w || v->last_h != h)) {
+    wp_viewport_set_destination(v->viewport, w, h);
+    v->last_w = w;
+    v->last_h = h;
+  }
+#endif
+
+  wl_surface_commit(v->child_surface);
+  wl_display_dispatch_queue_pending(g_wl.display, g_wl.queue);
+#endif
+}
+
+int cef_view_get_screenshot(void* raw_view, uint8_t** out_buf, int32_t* out_w, int32_t* out_h, size_t* out_size) {
+#ifdef STRIP_WAYLAND_DMABUF
+  View* v = static_cast<View*>(raw_view);
+  if (!v || !out_buf || !out_w || !out_h || !out_size) return -1;
+
+  std::lock_guard<std::mutex> lk(v->wayland_mu);
+  if (v->last_fd < 0 || v->last_size == 0 || v->last_buf_w <= 0 || v->last_buf_h <= 0) return -1;
+
+  void* map = mmap(nullptr, v->last_size, PROT_READ, MAP_SHARED, v->last_fd, 0);
+  if (map == MAP_FAILED) return -1;
+
+  size_t bytes = static_cast<size_t>(v->last_buf_w) * v->last_buf_h * 4;
+  uint8_t* dst = static_cast<uint8_t*>(malloc(bytes));
+  if (!dst) {
+    munmap(map, v->last_size);
+    return -1;
+  }
+
+  const uint8_t* src = static_cast<const uint8_t*>(map) + v->last_offset;
+  for (int32_t r = 0; r < v->last_buf_h; ++r) {
+    memcpy(dst + r * v->last_buf_w * 4, src + r * v->last_stride, v->last_buf_w * 4);
+  }
+  munmap(map, v->last_size);
+
+  *out_w = v->last_buf_w;
+  *out_h = v->last_buf_h;
+  *out_size = bytes;
+  *out_buf = dst;
+  return 0;
+#else
+  return -1;
+#endif
+}
+
+

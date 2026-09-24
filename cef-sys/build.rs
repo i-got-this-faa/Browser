@@ -59,6 +59,32 @@ fn main() {
         build.opt_level(0);
     }
 
+    let out_dir = PathBuf::from(std::env::var("OUT_DIR").unwrap());
+    let dmabuf_xml = "/usr/share/wayland-protocols/stable/linux-dmabuf/linux-dmabuf-v1.xml";
+    let viewporter_xml = "/usr/share/wayland-protocols/stable/viewporter/viewporter.xml";
+
+    if std::path::Path::new(dmabuf_xml).exists() {
+        let _ = std::process::Command::new("wayland-scanner")
+            .args(["client-header", dmabuf_xml, out_dir.join("linux-dmabuf-v1-client-protocol.h").to_str().unwrap()])
+            .status();
+        let _ = std::process::Command::new("wayland-scanner")
+            .args(["private-code", dmabuf_xml, out_dir.join("linux-dmabuf-v1-protocol.c").to_str().unwrap()])
+            .status();
+        build.define("STRIP_WAYLAND_DMABUF", "1");
+    }
+
+    if std::path::Path::new(viewporter_xml).exists() {
+        let _ = std::process::Command::new("wayland-scanner")
+            .args(["client-header", viewporter_xml, out_dir.join("viewporter-client-protocol.h").to_str().unwrap()])
+            .status();
+        let _ = std::process::Command::new("wayland-scanner")
+            .args(["private-code", viewporter_xml, out_dir.join("viewporter-protocol.c").to_str().unwrap()])
+            .status();
+        build.define("STRIP_WAYLAND_VIEWPORTER", "1");
+    }
+
+    build.include(&out_dir);
+
     // Every wrapper translation unit + the shim.
     let mut files: Vec<PathBuf> = Vec::new();
     collect_sources(&wrapper, &mut files);
@@ -67,6 +93,8 @@ fn main() {
         build.file(f);
     }
     build.compile("cef_shim");
+
+    println!("cargo:rustc-link-lib=dylib=wayland-client");
 
     // Link the shared engine.
     let release_dir = root.join("Release");
