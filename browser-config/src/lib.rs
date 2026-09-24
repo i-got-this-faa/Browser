@@ -61,6 +61,8 @@ pub struct Behavior {
     pub smooth_scroll: f32,
     pub show_page_bar: bool,
     pub show_status_bar: bool,
+    /// Target display refresh rate (Hz), e.g. 144. 0 = auto-detect via Wayland.
+    pub refresh_rate: u32,
 }
 
 impl Default for Behavior {
@@ -73,6 +75,7 @@ impl Default for Behavior {
             smooth_scroll: 0.18,
             show_page_bar: true,
             show_status_bar: true,
+            refresh_rate: 0,
         }
     }
 }
@@ -217,6 +220,7 @@ impl Config {
                 .clamp(0.05, 1.0);
             cfg.behavior.show_page_bar = get_bool_or(&b, "show_page_bar", cfg.behavior.show_page_bar);
             cfg.behavior.show_status_bar = get_bool_or(&b, "show_status_bar", cfg.behavior.show_status_bar);
+            cfg.behavior.refresh_rate = get_num_or(&b, "refresh_rate", cfg.behavior.refresh_rate as f32).max(0.0) as u32;
         }
         if let Some(keys) = nested_table(&t, "keys")? {
             cfg.keys = parse_keys(&keys)?;
@@ -385,7 +389,7 @@ mod tests {
     fn minimal_config_overrides_subset() {
         let src = r#"
             return {
-                behavior = { gap = 20 },
+                behavior = { gap = 20, refresh_rate = 144 },
                 keys = {
                     { "ctrl+j", "page.new" },
                     { "ctrl+1", "workspace.focus", arg = "1" },
@@ -395,6 +399,7 @@ mod tests {
         let cfg = Config::parse(src).unwrap();
         assert_eq!(cfg.behavior.gap, 20.0);
         assert_eq!(cfg.behavior.page_width_fraction, 0.78);
+        assert_eq!(cfg.behavior.refresh_rate, 144);
         assert_eq!(cfg.keys.len(), 2);
         assert_eq!(cfg.keys[1].arg.as_deref(), Some("1"));
     }
