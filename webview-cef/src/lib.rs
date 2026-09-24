@@ -151,6 +151,41 @@ impl CefWebView {
             unsafe { ffi::cef_view_destroy(self.view) };
         }
     }
+
+    pub fn set_geometry(&self, x: i32, y: i32, w: i32, h: i32, visible: bool, has_overlay: bool) {
+        unsafe {
+            ffi::cef_view_set_geometry(
+                self.view,
+                x,
+                y,
+                w,
+                h,
+                if visible { 1 } else { 0 },
+                if has_overlay { 1 } else { 0 },
+            );
+        }
+    }
+
+    pub fn get_screenshot(&self) -> Option<(u32, u32, Vec<u8>)> {
+        let mut buf: *mut u8 = std::ptr::null_mut();
+        let mut w: i32 = 0;
+        let mut h: i32 = 0;
+        let mut size: usize = 0;
+        unsafe {
+            if ffi::cef_view_get_screenshot(self.view, &mut buf, &mut w, &mut h, &mut size) == 0 && !buf.is_null() {
+                let slice = std::slice::from_raw_parts(buf, size);
+                let vec = slice.to_vec();
+                libc::free(buf as *mut libc::c_void);
+                Some((w as u32, h as u32, vec))
+            } else {
+                None
+            }
+        }
+    }
+}
+
+pub fn wayland_init(display: *mut std::ffi::c_void, parent_surface: *mut std::ffi::c_void) -> bool {
+    unsafe { ffi::cef_wayland_init(display, parent_surface) == 0 }
 }
 
 impl WebView for CefWebView {
@@ -271,9 +306,31 @@ extern "C" fn sink(ev: *const ffi::CefEvent, _ud: *mut c_void) {
         ffi::CEF_EV_FRAME | ffi::CEF_EV_POPUP_FRAME => {
             let n = ev.nrects.clamp(0, 16) as usize;
             let rects: Vec<[i32; 4]> = ev.rects[..n].to_vec();
-            // Latest damage wins: the shim buffer holds the union already,
-            // and the shell repaints from it wholesale on the next paint.
-            *entry.damage.lock().unwrap() = Some(rects);
+            // MERGE into what Rust has not drained yet: the shim sends the
+            // union of everything painted since the last drain, but several
+            // shim events can land between two drains, and OVERWRITING here
+            // dropped the earlier frames' rects — the shell then patched only
+            // the newest rect and stale pixels stayed on screen. An empty rect
+            // list is the documented "full frame" signal and resets the merge.
+            // (Cap bounds the list; overflow degrades to a full repaint.)
+            const MAX_DAMAGE_RECTS: usize = 64;
+            {
+                let mut d = entry.damage.lock().unwrap();
+                if rects.is_empty() {
+                    *d = Some(Vec::new());
+                } else if !matches!(d.as_ref(), Some(v) if v.is_empty()) {
+                    let full = d
+                        .as_mut()
+                        .map(|v| {
+                            v.extend_from_slice(&rects);
+                            v.len() > MAX_DAMAGE_RECTS
+                        })
+                        .unwrap_or(true);
+                    if full {
+                        *d = Some(Vec::new());
+                    }
+                }
+            }
             // Payload-free nudge: the shell reads pixels via with_frame();
             // nothing encoded ever crosses this boundary.
             if let Some(tx) = entry.tx.as_ref() {
@@ -296,6 +353,22 @@ extern "C" fn sink(ev: *const ffi::CefEvent, _ud: *mut c_void) {
             if let Some(tx) = entry.tx.as_ref() {
                 let _ = tx.send(WebViewEvent::UrlChanged(cstr(ev.str_)));
             }
+        }
+        ffi::CEF_EV_DMABUF => {
+            if let Some(tx) = entry.tx.as_ref() {
+                let _ = tx.send(WebViewEvent::Dmabuf {
+                    fd: ev.dmabuf_fd,
+                    width: ev.w as u32,
+                    height: ev.h as u32,
+                    stride: ev.stride,
+                    offset: ev.offset,
+                    modifier: ev.modifier,
+                    format: ev.drm_format,
+                });
+            } else {
+                unsafe { libc::close(ev.dmabuf_fd); }
+            }
+            browser_core::wakeslot::kick();
         }
         _ => {}
     }

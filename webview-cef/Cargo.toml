@@ -9,3 +9,5 @@ cef-sys = { path = "../cef-sys" }
 webview-cdp = { path = "../webview-cdp" }
 browser-core.workspace = true
 anyhow.workspace = true
+libc.workspace = true
+
