@@ -877,7 +877,7 @@ void* cef_view_create(uint64_t id, const char* url, int32_t w, int32_t h) {
   info.SetAsWindowless(cef_window_handle_t());
   info.shared_texture_enabled = 1;
 #ifdef STRIP_WAYLAND_DMABUF
-  info.external_begin_frame_enabled = (g_wl.parent_surface != nullptr) ? 1 : 0;
+  info.external_begin_frame_enabled = 0;
 #endif
   CefBrowserSettings bs;
   bs.windowless_frame_rate = get_target_frame_rate();
