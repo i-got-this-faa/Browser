@@ -369,7 +369,8 @@ impl Shell {
         // instead of ticking an unsynchronized 60Hz timer. When animation is in
         // flight (smooth scroll, kinetic scrolling, toast), it ticks aligned
         // with the monitor's native refresh rate (e.g. 144Hz = ~6.94ms) to
-        // eliminate 3:2 pulldown judder.
+        // eliminate 3:2 pulldown judder. When idle, a 50ms interval ensures
+        // control and background events wake the UI without spinning CPU.
         cx.spawn(async move |this, cx| loop {
             let (animate, target_fps) = this
                 .update(cx, |this, _| {
@@ -382,9 +383,11 @@ impl Shell {
             let frame_dur = std::time::Duration::from_nanos(1_000_000_000 / (target_fps as u64));
             let timer = cx.background_executor().timer(match animate {
                 true => frame_dur,
-                false => std::time::Duration::from_secs(3600),
+                false => std::time::Duration::from_millis(50),
             });
-            let wake = async { let _ = browser_core::wakeslot::frame_wake().recv().await; };
+            let wake = async {
+                let _ = browser_core::wakeslot::frame_wake().recv().await;
+            };
             futures_lite::future::or(timer, wake).await;
             if this.update(cx, |this, cx| this.frame(cx)).is_err() {
                 break; // shell released: window closed
@@ -1219,10 +1222,8 @@ impl Shell {
         }
     }
 
-    fn on_mouse_move(&mut self, ev: &MouseMoveEvent, window: &mut Window, _cx: &mut Context<Self>) {
+    fn on_mouse_move(&mut self, ev: &MouseMoveEvent, _window: &mut Window, _cx: &mut Context<Self>) {
         if let Some((id, local)) = self.page_under(ev.position) {
-            let cur = self.page_cursors.get(&id).copied().unwrap_or(CursorStyle::Arrow);
-            window.set_window_cursor_style(cur);
             self.engine.mouse(
                 id,
                 f32::from(local.x) as i32,
@@ -1231,8 +1232,6 @@ impl Shell {
                 webview_cdp::MouseButton::Left,
                 cdp_mods(&ev.modifiers),
             );
-        } else {
-            window.set_window_cursor_style(CursorStyle::Arrow);
         }
     }
 

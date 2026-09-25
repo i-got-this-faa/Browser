@@ -7,7 +7,7 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 BIN="${1:-$ROOT/target/debug/browser}"
 SOCK="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/strip-browser.sock"
 
-pkill -f "debug/browse[r]" 2>/dev/null || true
+pkill -x browser 2>/dev/null || true
 sleep 1
 
 "$BIN" >/tmp/cpu.log 2>&1 &

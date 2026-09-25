@@ -86,10 +86,6 @@ pub fn start() -> Option<ControlListener> {
                         if tx.send((s, line)).is_err() {
                             break; // UI thread gone
                         }
-                        // The pump may be parked awaiting wakes; nudge it to
-                        // come answer this client. Without this, a reply
-                        // waits for the next unrelated event (measured 213ms
-                        // latency before the fix).
                         browser_core::wakeslot::kick();
                     }
                     Err(_) => break,
@@ -124,7 +120,7 @@ fn read_request(stream: &UnixStream) -> Option<String> {
     stream
         .set_read_timeout(Some(std::time::Duration::from_millis(500)))
         .ok()?;
-    let mut reader = BufReader::new(stream.try_clone().ok()?);
+    let mut reader = BufReader::new(stream);
     let mut line = String::new();
     match reader.read_line(&mut line) {
         Ok(0) | Err(_) => None,
@@ -143,6 +139,7 @@ fn answer(
     let reply = exec_line(shell, line.trim(), cx);
     stream.write_all(reply.as_bytes())?;
     stream.write_all(b"\n")?;
+    let _ = stream.shutdown(std::net::Shutdown::Both);
     Ok(())
 }
 
