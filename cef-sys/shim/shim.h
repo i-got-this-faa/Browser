@@ -111,6 +111,9 @@ void cef_set_target_frame_rate(int32_t fps);
 int32_t cef_get_target_frame_rate(void);
 void cef_view_set_frame_rate(void *view, int32_t fps);
 
+void cef_view_mouse_leave(void *view);
+void cef_wayland_dispatch(void);
+
 #ifdef __cplusplus
 }
 #endif

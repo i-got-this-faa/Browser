@@ -55,10 +55,15 @@ fn to_gpui_cursor(cur: webview_cdp::WebCursor) -> CursorStyle {
         WebCursor::WestResize => CursorStyle::ResizeLeft,
         WebCursor::NorthSouthResize => CursorStyle::ResizeUpDown,
         WebCursor::EastWestResize => CursorStyle::ResizeLeftRight,
+        WebCursor::NorthEastSouthWestResize => CursorStyle::ResizeUpRightDownLeft,
+        WebCursor::NorthWestSouthEastResize => CursorStyle::ResizeUpLeftDownRight,
         WebCursor::ColumnResize => CursorStyle::ResizeColumn,
         WebCursor::RowResize => CursorStyle::ResizeRow,
         WebCursor::Move => CursorStyle::Arrow,
         WebCursor::VerticalText => CursorStyle::IBeamCursorForVerticalLayout,
+        WebCursor::ContextMenu => CursorStyle::ContextualMenu,
+        WebCursor::Alias => CursorStyle::DragLink,
+        WebCursor::Copy => CursorStyle::DragCopy,
         WebCursor::NotAllowed => CursorStyle::OperationNotAllowed,
         WebCursor::Grab => CursorStyle::OpenHand,
         WebCursor::Grabbing => CursorStyle::ClosedHand,
@@ -192,6 +197,7 @@ struct Shell {
     wayland_active: bool,
     page_cursors: HashMap<u64, CursorStyle>,
     scroll_physics: HashMap<u64, ScrollPhysics>,
+    last_mouse_page: Option<u64>,
 }
 
 /// One page's render surface. `bgra` is the LIVE CPU-side frame: the pump
@@ -361,6 +367,7 @@ impl Shell {
             wayland_active,
             page_cursors: HashMap::new(),
             scroll_physics: HashMap::new(),
+            last_mouse_page: None,
         };
         shell.reload_lua(cx);
         shell.ensure_first_page(cx);
@@ -369,8 +376,7 @@ impl Shell {
         // instead of ticking an unsynchronized 60Hz timer. When animation is in
         // flight (smooth scroll, kinetic scrolling, toast), it ticks aligned
         // with the monitor's native refresh rate (e.g. 144Hz = ~6.94ms) to
-        // eliminate 3:2 pulldown judder. When idle, a 50ms interval ensures
-        // control and background events wake the UI without spinning CPU.
+        // eliminate 3:2 pulldown judder. When idle, long timeout allows zero CPU.
         cx.spawn(async move |this, cx| loop {
             let (animate, target_fps) = this
                 .update(cx, |this, _| {
@@ -383,7 +389,7 @@ impl Shell {
             let frame_dur = std::time::Duration::from_nanos(1_000_000_000 / (target_fps as u64));
             let timer = cx.background_executor().timer(match animate {
                 true => frame_dur,
-                false => std::time::Duration::from_millis(50),
+                false => std::time::Duration::from_secs(3600),
             });
             let wake = async {
                 let _ = browser_core::wakeslot::frame_wake().recv().await;
@@ -707,6 +713,8 @@ impl Shell {
         let _s = perf_span!("frame");
         let mut dirty = false;
 
+        self.engine.wayland_dispatch();
+
         if self.drain_engine_events(cx) {
             dirty = true;
         }
@@ -733,13 +741,12 @@ impl Shell {
         // Kinetic scrolling physics step (smooth subpixel deceleration)
         for (page_id, physics) in self.scroll_physics.iter_mut() {
             if physics.vel_x.abs() > 0.5 || physics.vel_y.abs() > 0.5 {
+                physics.accum_x += physics.vel_x * 0.35;
+                physics.accum_y += physics.vel_y * 0.35;
                 physics.vel_x *= 0.88;
                 physics.vel_y *= 0.88;
                 if physics.vel_x.abs() < 0.5 { physics.vel_x = 0.0; }
                 if physics.vel_y.abs() < 0.5 { physics.vel_y = 0.0; }
-
-                physics.accum_x += physics.vel_x;
-                physics.accum_y += physics.vel_y;
 
                 let step_x = physics.accum_x.trunc() as i32;
                 if step_x != 0 {
@@ -1203,7 +1210,7 @@ impl Shell {
         }
     }
 
-    fn on_mouse_up(&mut self, ev: &MouseUpEvent, _window: &mut Window, _cx: &mut Context<Self>) {
+    fn on_mouse_up(&mut self, ev: &MouseUpEvent, _window: &mut Window, cx: &mut Context<Self>) {
         if let Some((id, local)) = self.page_under(ev.position) {
             let button = match ev.button {
                 MouseButton::Left => webview_cdp::MouseButton::Left,
@@ -1219,11 +1226,20 @@ impl Shell {
                 button,
                 cdp_mods(&ev.modifiers),
             );
+            cx.notify();
         }
     }
 
-    fn on_mouse_move(&mut self, ev: &MouseMoveEvent, _window: &mut Window, _cx: &mut Context<Self>) {
-        if let Some((id, local)) = self.page_under(ev.position) {
+    fn on_mouse_move(&mut self, ev: &MouseMoveEvent, _window: &mut Window, cx: &mut Context<Self>) {
+        let page = self.page_under(ev.position);
+        let current_id = page.as_ref().map(|(id, _)| *id);
+        if self.last_mouse_page != current_id {
+            if let Some(prev_id) = self.last_mouse_page.take() {
+                self.engine.mouse_leave(prev_id);
+            }
+            self.last_mouse_page = current_id;
+        }
+        if let Some((id, local)) = page {
             self.engine.mouse(
                 id,
                 f32::from(local.x) as i32,
@@ -1232,6 +1248,7 @@ impl Shell {
                 webview_cdp::MouseButton::Left,
                 cdp_mods(&ev.modifiers),
             );
+            cx.notify();
         }
     }
 
@@ -1239,31 +1256,38 @@ impl Shell {
         if let Some((id, local)) = self.page_under(ev.position) {
             let lx = f32::from(local.x) as i32;
             let ly = f32::from(local.y) as i32;
-            let d = ev.delta.pixel_delta(px(20.0));
-            let dx = f32::from(d.x);
-            let dy = f32::from(d.y);
-
+            let is_precise = ev.delta.precise();
             let physics = self.scroll_physics.entry(id).or_default();
             physics.last_x = lx;
             physics.last_y = ly;
-            physics.accum_x += dx;
-            physics.accum_y += dy;
 
-            // Kinetic momentum impulse
-            physics.vel_x = (physics.vel_x * 0.4 + dx * 0.6).clamp(-120.0, 120.0);
-            physics.vel_y = (physics.vel_y * 0.4 + dy * 0.6).clamp(-120.0, 120.0);
+            if is_precise {
+                // Continuous touchpad gesture: accumulate exact subpixel deltas without friction fight
+                let d = ev.delta.pixel_delta(px(20.0));
+                physics.accum_x += f32::from(d.x);
+                physics.accum_y += f32::from(d.y);
 
-            let step_x = physics.accum_x.trunc() as i32;
-            if step_x != 0 {
-                physics.accum_x -= step_x as f32;
-            }
-            let step_y = physics.accum_y.trunc() as i32;
-            if step_y != 0 {
-                physics.accum_y -= step_y as f32;
-            }
+                let step_x = physics.accum_x.trunc() as i32;
+                if step_x != 0 {
+                    physics.accum_x -= step_x as f32;
+                }
+                let step_y = physics.accum_y.trunc() as i32;
+                if step_y != 0 {
+                    physics.accum_y -= step_y as f32;
+                }
 
-            if step_x != 0 || step_y != 0 {
-                self.engine.scroll(id, lx, ly, step_x, step_y);
+                if step_x != 0 || step_y != 0 {
+                    self.engine.scroll(id, lx, ly, step_x, step_y);
+                }
+            } else {
+                // Discrete mouse wheel notch: smooth continuous momentum dispersion
+                let d = ev.delta.pixel_delta(px(28.0));
+                let dx = f32::from(d.x);
+                let dy = f32::from(d.y);
+
+                // Add to velocity impulse for kinetic decay across frames
+                physics.vel_x = (physics.vel_x * 0.5 + dx * 0.5).clamp(-160.0, 160.0);
+                physics.vel_y = (physics.vel_y * 0.5 + dy * 0.5).clamp(-160.0, 160.0);
             }
             cx.notify();
         }

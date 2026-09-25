@@ -259,6 +259,14 @@ impl EngineController {
         }
     }
 
+    /// Notify page that mouse has left.
+    pub fn mouse_leave(&self, page_id: u64) {
+        let shared = self.shared.lock().unwrap();
+        if let Some(PageView::Cef(v)) = shared.views.get(&page_id) {
+            v.mouse_leave();
+        }
+    }
+
     /// Forward a scroll event at page-local coordinates.
     pub fn scroll(&self, page_id: u64, x: i32, y: i32, dx: i32, dy: i32) {
         let shared = self.shared.lock().unwrap();
@@ -290,12 +298,12 @@ impl EngineController {
                         if k.mods.alt { m |= 1 << 3; }
                         if k.mods.meta { m |= 1 << 7; }
                         let vk = k.vk as i32;
+                        v.key_fast(0, vk, vk, m, 0);
                         if let Some(text) = &k.text {
                             for c in text.encode_utf16() {
                                 v.key_fast(3, vk, vk, m, c);
                             }
                         }
-                        v.key_fast(0, vk, vk, m, 0);
                         v.key_fast(2, vk, vk, m, 0);
                     }
                 }
@@ -361,6 +369,10 @@ impl EngineController {
 
     pub fn wayland_init(&self, display: *mut std::ffi::c_void, parent_surface: *mut std::ffi::c_void) -> bool {
         webview_cef::wayland_init(display, parent_surface)
+    }
+
+    pub fn wayland_dispatch(&self) {
+        webview_cef::wayland_dispatch();
     }
 
     pub fn set_geometry(&self, page_id: u64, x: i32, y: i32, w: i32, h: i32, visible: bool, has_overlay: bool) {

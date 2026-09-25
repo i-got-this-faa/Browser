@@ -110,4 +110,6 @@ unsafe extern "C" {
     pub fn cef_set_target_frame_rate(fps: c_int);
     pub fn cef_get_target_frame_rate() -> c_int;
     pub fn cef_view_set_frame_rate(view: *mut c_void, fps: c_int);
+    pub fn cef_view_mouse_leave(view: *mut c_void);
+    pub fn cef_wayland_dispatch();
 }

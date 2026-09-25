@@ -127,10 +127,15 @@ pub enum WebCursor {
     WestResize,
     NorthSouthResize,
     EastWestResize,
+    NorthEastSouthWestResize,
+    NorthWestSouthEastResize,
     ColumnResize,
     RowResize,
     Move,
     VerticalText,
+    ContextMenu,
+    Alias,
+    Copy,
     NotAllowed,
     Grab,
     Grabbing,
@@ -156,16 +161,27 @@ impl WebCursor {
             13 => WebCursor::WestResize,
             14 => WebCursor::NorthSouthResize,
             15 => WebCursor::EastWestResize,
-            16 => WebCursor::NorthEastResize,
-            17 => WebCursor::NorthWestResize,
+            16 => WebCursor::NorthEastSouthWestResize,
+            17 => WebCursor::NorthWestSouthEastResize,
             18 => WebCursor::ColumnResize,
             19 => WebCursor::RowResize,
-            27 => WebCursor::Move,
-            28 => WebCursor::VerticalText,
-            35 => WebCursor::None,
-            36 => WebCursor::NotAllowed,
-            39 => WebCursor::Grab,
-            40 => WebCursor::Grabbing,
+            20..=29 => WebCursor::Move,
+            30 => WebCursor::VerticalText,
+            31 => WebCursor::Cross,
+            32 => WebCursor::ContextMenu,
+            33 => WebCursor::Alias,
+            34 => WebCursor::Wait,
+            35 => WebCursor::NotAllowed,
+            36 => WebCursor::Copy,
+            37 => WebCursor::None,
+            38 => WebCursor::NotAllowed,
+            39 | 40 => WebCursor::Pointer,
+            41 => WebCursor::Grab,
+            42 => WebCursor::Grabbing,
+            46 => WebCursor::NotAllowed,
+            47 => WebCursor::Move,
+            48 => WebCursor::Copy,
+            49 => WebCursor::Alias,
             _ => WebCursor::Pointer,
         }
     }
@@ -1071,5 +1087,38 @@ mod tests {
         assert!(got_frame, "no screencast frame from real chrome");
         Box::new(view).close().unwrap();
         engine.shutdown();
+    }
+
+    #[test]
+    fn cursor_type_mapping_accuracy() {
+        assert_eq!(WebCursor::from_cef_type(0), WebCursor::Pointer);
+        assert_eq!(WebCursor::from_cef_type(1), WebCursor::Cross);
+        assert_eq!(WebCursor::from_cef_type(2), WebCursor::Hand);
+        assert_eq!(WebCursor::from_cef_type(3), WebCursor::IBeam);
+        assert_eq!(WebCursor::from_cef_type(4), WebCursor::Wait);
+        assert_eq!(WebCursor::from_cef_type(5), WebCursor::Help);
+        assert_eq!(WebCursor::from_cef_type(6), WebCursor::EastResize);
+        assert_eq!(WebCursor::from_cef_type(7), WebCursor::NorthResize);
+        assert_eq!(WebCursor::from_cef_type(8), WebCursor::NorthEastResize);
+        assert_eq!(WebCursor::from_cef_type(9), WebCursor::NorthWestResize);
+        assert_eq!(WebCursor::from_cef_type(10), WebCursor::SouthResize);
+        assert_eq!(WebCursor::from_cef_type(11), WebCursor::SouthEastResize);
+        assert_eq!(WebCursor::from_cef_type(12), WebCursor::SouthWestResize);
+        assert_eq!(WebCursor::from_cef_type(13), WebCursor::WestResize);
+        assert_eq!(WebCursor::from_cef_type(14), WebCursor::NorthSouthResize);
+        assert_eq!(WebCursor::from_cef_type(15), WebCursor::EastWestResize);
+        assert_eq!(WebCursor::from_cef_type(16), WebCursor::NorthEastSouthWestResize);
+        assert_eq!(WebCursor::from_cef_type(17), WebCursor::NorthWestSouthEastResize);
+        assert_eq!(WebCursor::from_cef_type(18), WebCursor::ColumnResize);
+        assert_eq!(WebCursor::from_cef_type(19), WebCursor::RowResize);
+        assert_eq!(WebCursor::from_cef_type(29), WebCursor::Move);
+        assert_eq!(WebCursor::from_cef_type(30), WebCursor::VerticalText);
+        assert_eq!(WebCursor::from_cef_type(32), WebCursor::ContextMenu);
+        assert_eq!(WebCursor::from_cef_type(33), WebCursor::Alias);
+        assert_eq!(WebCursor::from_cef_type(36), WebCursor::Copy);
+        assert_eq!(WebCursor::from_cef_type(37), WebCursor::None);
+        assert_eq!(WebCursor::from_cef_type(38), WebCursor::NotAllowed);
+        assert_eq!(WebCursor::from_cef_type(41), WebCursor::Grab);
+        assert_eq!(WebCursor::from_cef_type(42), WebCursor::Grabbing);
     }
 }

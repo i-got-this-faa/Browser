@@ -198,6 +198,11 @@ impl CefWebView {
         unsafe { ffi::cef_view_key(self.view, key_type, code, native_code, mods, ch) };
     }
 
+    /// Notify CEF that the mouse has left the view (resetting hover states).
+    pub fn mouse_leave(&self) {
+        unsafe { ffi::cef_view_mouse_leave(self.view) };
+    }
+
     /// Dynamically override view frame rate (e.g. 144 FPS).
     pub fn set_frame_rate(&self, fps: i32) {
         unsafe { ffi::cef_view_set_frame_rate(self.view, fps) };
@@ -206,6 +211,10 @@ impl CefWebView {
 
 pub fn wayland_init(display: *mut std::ffi::c_void, parent_surface: *mut std::ffi::c_void) -> bool {
     unsafe { ffi::cef_wayland_init(display, parent_surface) == 0 }
+}
+
+pub fn wayland_dispatch() {
+    unsafe { ffi::cef_wayland_dispatch() };
 }
 
 pub fn set_target_frame_rate(fps: i32) {

@@ -45,6 +45,12 @@ extern "C" {
 #pragma GCC diagnostic pop
 }
 
+struct OutputInfo {
+  uint32_t name = 0;
+  struct wl_output* output = nullptr;
+  int32_t refresh_hz = 60;
+};
+
 struct WlContext {
   struct wl_display* display = nullptr;
   struct wl_surface* parent_surface = nullptr;
@@ -53,7 +59,8 @@ struct WlContext {
   struct wl_subcompositor* subcompositor = nullptr;
   struct zwp_linux_dmabuf_v1* dmabuf = nullptr;
   struct wp_viewporter* viewporter = nullptr;
-  struct wl_output* output = nullptr;
+  std::map<uint32_t, std::unique_ptr<OutputInfo>> outputs;
+  std::map<struct wl_output*, OutputInfo*> output_by_ptr;
   std::recursive_mutex mu;
 };
 
@@ -237,7 +244,7 @@ struct BufferKey {
 struct PooledBuffer {
   struct wl_buffer* buffer = nullptr;
   BufferKey key{};
-  bool in_use = false;
+  std::atomic<bool> in_use{false};
   uint64_t last_used_frame = 0;
 
   PooledBuffer() = default;
@@ -295,17 +302,24 @@ struct View : public CefBaseRefCounted {
   std::recursive_mutex wayland_mu;
 
   void prune_buffer_pool() {
-    if (buffer_pool.size() <= 8) return;
-    for (auto it = buffer_pool.begin(); it != buffer_pool.end(); ) {
-      if (!it->second->in_use && (it->first.width != static_cast<uint32_t>(last_buf_w) || it->first.height != static_cast<uint32_t>(last_buf_h))) {
-        it = buffer_pool.erase(it);
-      } else {
-        ++it;
+    if (buffer_pool.size() <= 6) return;
+    auto oldest = buffer_pool.end();
+    uint64_t oldest_frame = UINT64_MAX;
+    for (auto it = buffer_pool.begin(); it != buffer_pool.end(); ++it) {
+      if (!it->second->in_use.load(std::memory_order_acquire) &&
+          it->second->buffer != current_buffer) {
+        if (it->second->last_used_frame < oldest_frame) {
+          oldest_frame = it->second->last_used_frame;
+          oldest = it;
+        }
       }
+    }
+    if (oldest != buffer_pool.end()) {
+      buffer_pool.erase(oldest);
     }
   }
 
-  void request_frame_callback_locked(struct wl_event_queue* queue);
+  void request_frame_callback_locked(struct wl_event_queue* queue = nullptr);
 
   void on_vblank_done(uint32_t) {
     CefRefPtr<CefBrowser> b;
@@ -319,6 +333,19 @@ struct View : public CefBaseRefCounted {
       CefPostTask(TID_UI, base::BindOnce([](CefRefPtr<CefBrowser> b) {
         if (b) b->GetHost()->SendExternalBeginFrame();
       }, b));
+    }
+  }
+
+  void set_frame_rate(int32_t fps) {
+    CefRefPtr<CefBrowser> b;
+    {
+      std::lock_guard<std::recursive_mutex> lk(wayland_mu);
+      b = browser;
+    }
+    if (b) {
+      CefPostTask(TID_UI, base::BindOnce([](CefRefPtr<CefBrowser> b, int32_t rate) {
+        if (b) b->GetHost()->SetWindowlessFrameRate(rate);
+      }, b, fps));
     }
   }
 
@@ -371,7 +398,7 @@ static const struct wl_callback_listener view_frame_listener = {
 static void pooled_buffer_release(void* data, struct wl_buffer*) {
   PooledBuffer* pb = static_cast<PooledBuffer*>(data);
   if (pb) {
-    pb->in_use = false;
+    pb->in_use.store(false, std::memory_order_release);
   }
 }
 static const struct wl_buffer_listener pooled_buffer_listener = {
@@ -379,10 +406,14 @@ static const struct wl_buffer_listener pooled_buffer_listener = {
 };
 
 void View::request_frame_callback_locked(struct wl_event_queue* queue) {
-  if (!frame_callback_pending && child_surface && queue) {
+  if (!frame_callback_pending && child_surface) {
     frame_callback = wl_surface_frame(child_surface);
     if (frame_callback) {
-      wl_proxy_set_queue(reinterpret_cast<struct wl_proxy*>(frame_callback), queue);
+      if (queue) {
+        wl_proxy_set_queue(reinterpret_cast<struct wl_proxy*>(frame_callback), queue);
+      } else {
+        wl_proxy_set_queue(reinterpret_cast<struct wl_proxy*>(frame_callback), nullptr);
+      }
       wl_callback_add_listener(frame_callback, &view_frame_listener, this);
       frame_callback_pending = true;
     }
@@ -540,11 +571,11 @@ struct RenderHandler : public CefRenderHandler {
           zwp_linux_buffer_params_v1_destroy(params);
 
           if (buf) {
-            wl_proxy_set_queue(reinterpret_cast<struct wl_proxy*>(buf), g_wl.queue);
+            wl_proxy_set_queue(reinterpret_cast<struct wl_proxy*>(buf), nullptr);
             auto new_pb = std::make_unique<PooledBuffer>();
             new_pb->buffer = buf;
             new_pb->key = bkey;
-            new_pb->in_use = false;
+            new_pb->in_use.store(false, std::memory_order_relaxed);
             wl_buffer_add_listener(buf, &pooled_buffer_listener, new_pb.get());
             pb = new_pb.get();
             view->buffer_pool[bkey] = std::move(new_pb);
@@ -553,7 +584,7 @@ struct RenderHandler : public CefRenderHandler {
         }
 
         if (pb && pb->buffer) {
-          pb->in_use = true;
+          pb->in_use.store(true, std::memory_order_release);
           pb->last_used_frame = ++view->frame_seq;
           wl_surface_attach(view->child_surface, pb->buffer, 0, 0);
           wl_surface_damage(view->child_surface, 0, 0, INT32_MAX, INT32_MAX);
@@ -563,7 +594,7 @@ struct RenderHandler : public CefRenderHandler {
           }
 #endif
           // Align next frame deadline with Wayland vblank
-          view->request_frame_callback_locked(g_wl.queue);
+          view->request_frame_callback_locked(nullptr);
           wl_surface_commit(view->child_surface);
           view->current_buffer = pb->buffer;
 
@@ -846,7 +877,7 @@ void* cef_view_create(uint64_t id, const char* url, int32_t w, int32_t h) {
   info.SetAsWindowless(cef_window_handle_t());
   info.shared_texture_enabled = 1;
 #ifdef STRIP_WAYLAND_DMABUF
-  info.external_begin_frame_enabled = 0;
+  info.external_begin_frame_enabled = (g_wl.parent_surface != nullptr) ? 1 : 0;
 #endif
   CefBrowserSettings bs;
   bs.windowless_frame_rate = get_target_frame_rate();
@@ -1064,6 +1095,7 @@ void cef_view_mouse(void* view, int kind, int button, int x, int y,
   CefPostTask(TID_UI, base::BindOnce(
       [](ViewRef v, int kind, int button, int x, int y, int cc, uint32_t mods) {
         if (!v || !v->browser) return;
+        v->has_pending_move.store(false, std::memory_order_release);
         CefMouseEvent ev;
         ev.x = x;
         ev.y = y;
@@ -1074,6 +1106,23 @@ void cef_view_mouse(void* view, int kind, int button, int x, int y,
             up, cc);
         v->browser->GetHost()->SendExternalBeginFrame();
       }, v, kind, button, x, y, click_count, total_mods));
+}
+
+void cef_view_mouse_leave(void* view) {
+  View* raw = static_cast<View*>(view);
+  if (!raw) return;
+  ViewRef v(raw);
+  CefPostTask(TID_UI, base::BindOnce(
+      [](ViewRef v) {
+        if (!v || !v->browser) return;
+        v->has_pending_move.store(false, std::memory_order_release);
+        CefMouseEvent ev;
+        ev.x = -1;
+        ev.y = -1;
+        ev.modifiers = 0;
+        v->browser->GetHost()->SendMouseMoveEvent(ev, true);
+        v->browser->GetHost()->SendExternalBeginFrame();
+      }, v));
 }
 
 void cef_view_wheel(void* view, int x, int y, int dx, int dy) {
@@ -1117,12 +1166,16 @@ void cef_view_key(void* view, int type, int windows_key_code,
 #ifdef STRIP_WAYLAND_DMABUF
 static void output_handle_geometry(void*, struct wl_output*, int32_t, int32_t, int32_t, int32_t,
                                    int32_t, const char*, const char*, int32_t) {}
-static void output_handle_mode(void*, struct wl_output*, uint32_t flags,
+static void output_handle_mode(void* data, struct wl_output*, uint32_t flags,
                                int32_t, int32_t, int32_t refresh) {
-  if (flags & WL_OUTPUT_MODE_CURRENT) {
+  OutputInfo* info = static_cast<OutputInfo*>(data);
+  if (info && (flags & WL_OUTPUT_MODE_CURRENT)) {
     int32_t hz = (refresh + 500) / 1000;
+    info->refresh_hz = hz;
     if (hz >= 24 && hz <= 360) {
-      cef_set_target_frame_rate(hz);
+      if (g_target_fps.load(std::memory_order_relaxed) <= 60) {
+        cef_set_target_frame_rate(hz);
+      }
     }
   }
 }
@@ -1134,6 +1187,26 @@ static const struct wl_output_listener output_listener = {
     output_handle_mode,
     output_handle_done,
     output_handle_scale,
+};
+
+static void surface_handle_enter(void* data, struct wl_surface*, struct wl_output* output) {
+  View* v = static_cast<View*>(data);
+  if (!v || !output) return;
+  std::lock_guard<std::recursive_mutex> lk(g_wl.mu);
+  auto it = g_wl.output_by_ptr.find(output);
+  if (it != g_wl.output_by_ptr.end() && it->second) {
+    int32_t hz = it->second->refresh_hz;
+    if (hz >= 24 && hz <= 360) {
+      cef_set_target_frame_rate(hz);
+      cef_view_set_frame_rate(v, hz);
+    }
+  }
+}
+static void surface_handle_leave(void*, struct wl_surface*, struct wl_output*) {}
+
+static const struct wl_surface_listener surface_listener = {
+    surface_handle_enter,
+    surface_handle_leave,
 };
 
 static void registry_handle_global(void* data, struct wl_registry* registry,
@@ -1150,11 +1223,17 @@ static void registry_handle_global(void* data, struct wl_registry* registry,
     ctx->dmabuf = static_cast<struct zwp_linux_dmabuf_v1*>(
         wl_registry_bind(registry, name, &zwp_linux_dmabuf_v1_interface, std::min<uint32_t>(version, 3)));
   } else if (strcmp(interface, "wl_output") == 0) {
-    if (!ctx->output) {
-      ctx->output = static_cast<struct wl_output*>(
-          wl_registry_bind(registry, name, &wl_output_interface, std::min<uint32_t>(version, 2)));
-      wl_proxy_set_queue(reinterpret_cast<struct wl_proxy*>(ctx->output), ctx->queue);
-      wl_output_add_listener(ctx->output, &output_listener, ctx);
+    struct wl_output* out = static_cast<struct wl_output*>(
+        wl_registry_bind(registry, name, &wl_output_interface, std::min<uint32_t>(version, 2)));
+    if (out) {
+      auto info = std::make_unique<OutputInfo>();
+      info->name = name;
+      info->output = out;
+      info->refresh_hz = 60;
+      OutputInfo* raw = info.get();
+      ctx->outputs[name] = std::move(info);
+      ctx->output_by_ptr[out] = raw;
+      wl_output_add_listener(out, &output_listener, raw);
     }
   }
 #ifdef STRIP_WAYLAND_VIEWPORTER
@@ -1165,7 +1244,16 @@ static void registry_handle_global(void* data, struct wl_registry* registry,
 #endif
 }
 
-static void registry_handle_global_remove(void*, struct wl_registry*, uint32_t) {}
+static void registry_handle_global_remove(void* data, struct wl_registry*, uint32_t name) {
+  WlContext* ctx = static_cast<WlContext*>(data);
+  if (!ctx) return;
+  auto it = ctx->outputs.find(name);
+  if (it != ctx->outputs.end()) {
+    ctx->output_by_ptr.erase(it->second->output);
+    wl_output_destroy(it->second->output);
+    ctx->outputs.erase(it);
+  }
+}
 
 static const struct wl_registry_listener registry_listener = {
     registry_handle_global,
@@ -1226,16 +1314,13 @@ void cef_view_attach_wayland(void* raw_view) {
   if (v->child_surface) return;
 
   v->child_surface = wl_compositor_create_surface(g_wl.compositor);
-  wl_proxy_set_queue(reinterpret_cast<struct wl_proxy*>(v->child_surface), g_wl.queue);
+  wl_surface_add_listener(v->child_surface, &surface_listener, v);
 
   struct wl_region* empty_region = wl_compositor_create_region(g_wl.compositor);
-  wl_proxy_set_queue(reinterpret_cast<struct wl_proxy*>(empty_region), g_wl.queue);
   wl_surface_set_input_region(v->child_surface, empty_region);
   wl_region_destroy(empty_region);
 
   v->subsurface = wl_subcompositor_get_subsurface(g_wl.subcompositor, v->child_surface, g_wl.parent_surface);
-  wl_proxy_set_queue(reinterpret_cast<struct wl_proxy*>(v->subsurface), g_wl.queue);
-
   wl_subsurface_set_desync(v->subsurface);
   wl_subsurface_place_above(v->subsurface, g_wl.parent_surface);
   v->is_above = true;
@@ -1243,12 +1328,11 @@ void cef_view_attach_wayland(void* raw_view) {
 #ifdef STRIP_WAYLAND_VIEWPORTER
   if (g_wl.viewporter) {
     v->viewport = wp_viewporter_get_viewport(g_wl.viewporter, v->child_surface);
-    wl_proxy_set_queue(reinterpret_cast<struct wl_proxy*>(v->viewport), g_wl.queue);
   }
 #endif
 
   wl_surface_commit(v->child_surface);
-  wl_display_dispatch_queue_pending(g_wl.display, g_wl.queue);
+  wl_display_flush(g_wl.display);
 #endif
 }
 
@@ -1338,6 +1422,18 @@ int cef_view_get_screenshot(void* raw_view, uint8_t** out_buf, int32_t* out_w, i
   return 0;
 #else
   return -1;
+#endif
+}
+
+void cef_wayland_dispatch() {
+#ifdef STRIP_WAYLAND_DMABUF
+  std::lock_guard<std::recursive_mutex> lk(g_wl.mu);
+  if (g_wl.display) {
+    if (g_wl.queue) {
+      wl_display_dispatch_queue_pending(g_wl.display, g_wl.queue);
+    }
+    wl_display_dispatch_pending(g_wl.display);
+  }
 #endif
 }
 
