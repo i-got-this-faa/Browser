@@ -54,7 +54,7 @@ struct WlContext {
   struct zwp_linux_dmabuf_v1* dmabuf = nullptr;
   struct wp_viewporter* viewporter = nullptr;
   struct wl_output* output = nullptr;
-  std::mutex mu;
+  std::recursive_mutex mu;
 };
 
 static WlContext g_wl;
@@ -292,7 +292,7 @@ struct View : public CefBaseRefCounted {
   uint64_t last_offset = 0;
   int32_t last_buf_w = 0;
   int32_t last_buf_h = 0;
-  std::mutex wayland_mu;
+  std::recursive_mutex wayland_mu;
 
   void prune_buffer_pool() {
     if (buffer_pool.size() <= 8) return;
@@ -308,16 +308,22 @@ struct View : public CefBaseRefCounted {
   void request_frame_callback_locked(struct wl_event_queue* queue);
 
   void on_vblank_done(uint32_t) {
-    std::lock_guard<std::mutex> lk(wayland_mu);
-    frame_callback = nullptr;
-    frame_callback_pending = false;
-    if (browser) {
-      browser->GetHost()->SendExternalBeginFrame();
+    CefRefPtr<CefBrowser> b;
+    {
+      std::lock_guard<std::recursive_mutex> lk(wayland_mu);
+      frame_callback = nullptr;
+      frame_callback_pending = false;
+      b = browser;
+    }
+    if (b) {
+      CefPostTask(TID_UI, base::BindOnce([](CefRefPtr<CefBrowser> b) {
+        if (b) b->GetHost()->SendExternalBeginFrame();
+      }, b));
     }
   }
 
   ~View() override {
-    std::lock_guard<std::mutex> lk(wayland_mu);
+    std::lock_guard<std::recursive_mutex> lk(wayland_mu);
     if (frame_callback) {
       wl_callback_destroy(frame_callback);
       frame_callback = nullptr;
@@ -462,9 +468,9 @@ struct RenderHandler : public CefRenderHandler {
 
 #ifdef STRIP_WAYLAND_DMABUF
     {
-      std::lock_guard<std::mutex> lk_wl(g_wl.mu);
+      std::lock_guard<std::recursive_mutex> lk_wl(g_wl.mu);
       if (g_wl.dmabuf && view->child_surface) {
-        std::lock_guard<std::mutex> lk(view->wayland_mu);
+        std::lock_guard<std::recursive_mutex> lk(view->wayland_mu);
 
         uint64_t plane_size = info.planes[0].size;
         if (plane_size == 0 && info.planes[0].fd >= 0) {
@@ -840,7 +846,7 @@ void* cef_view_create(uint64_t id, const char* url, int32_t w, int32_t h) {
   info.SetAsWindowless(cef_window_handle_t());
   info.shared_texture_enabled = 1;
 #ifdef STRIP_WAYLAND_DMABUF
-  info.external_begin_frame_enabled = (g_wl.dmabuf != nullptr) ? 1 : 0;
+  info.external_begin_frame_enabled = 0;
 #endif
   CefBrowserSettings bs;
   bs.windowless_frame_rate = get_target_frame_rate();
@@ -1169,7 +1175,7 @@ static const struct wl_registry_listener registry_listener = {
 
 int cef_wayland_init(void* display, void* parent_surface) {
 #ifdef STRIP_WAYLAND_DMABUF
-  std::lock_guard<std::mutex> lk(g_wl.mu);
+  std::lock_guard<std::recursive_mutex> lk(g_wl.mu);
   g_wl.display = static_cast<struct wl_display*>(display);
   g_wl.parent_surface = static_cast<struct wl_surface*>(parent_surface);
   if (!g_wl.display || !g_wl.parent_surface) return -1;
@@ -1213,10 +1219,10 @@ void cef_view_attach_wayland(void* raw_view) {
   View* v = static_cast<View*>(raw_view);
   if (!v) return;
 
-  std::lock_guard<std::mutex> lk_wl(g_wl.mu);
+  std::lock_guard<std::recursive_mutex> lk_wl(g_wl.mu);
   if (!g_wl.display || !g_wl.compositor || !g_wl.subcompositor || !g_wl.parent_surface) return;
 
-  std::lock_guard<std::mutex> lk(v->wayland_mu);
+  std::lock_guard<std::recursive_mutex> lk(v->wayland_mu);
   if (v->child_surface) return;
 
   v->child_surface = wl_compositor_create_surface(g_wl.compositor);
@@ -1252,10 +1258,10 @@ void cef_view_set_geometry(void* raw_view, int32_t x, int32_t y, int32_t w, int3
   View* v = static_cast<View*>(raw_view);
   if (!v) return;
 
-  std::lock_guard<std::mutex> lk_wl(g_wl.mu);
+  std::lock_guard<std::recursive_mutex> lk_wl(g_wl.mu);
   if (!g_wl.display) return;
 
-  std::lock_guard<std::mutex> lk(v->wayland_mu);
+  std::lock_guard<std::recursive_mutex> lk(v->wayland_mu);
   if (!v->subsurface || !v->child_surface) return;
 
   if (!visible) {
@@ -1306,7 +1312,7 @@ int cef_view_get_screenshot(void* raw_view, uint8_t** out_buf, int32_t* out_w, i
   View* v = static_cast<View*>(raw_view);
   if (!v || !out_buf || !out_w || !out_h || !out_size) return -1;
 
-  std::lock_guard<std::mutex> lk(v->wayland_mu);
+  std::lock_guard<std::recursive_mutex> lk(v->wayland_mu);
   if (v->last_fd < 0 || v->last_size == 0 || v->last_buf_w <= 0 || v->last_buf_h <= 0) return -1;
 
   void* map = mmap(nullptr, v->last_size, PROT_READ, MAP_SHARED, v->last_fd, 0);
