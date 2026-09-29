@@ -39,7 +39,8 @@ return {
   --   page.next, page.prev, workspace.new, workspace.next, workspace.prev,
   --   workspace.focus (arg = n), page.to_workspace (arg = n),
   --   overview.toggle, layout.scroll_left, layout.scroll_right,
-  --   palette.open, config.reload, app.quit
+  --   palette.open, bookmark.toggle, bookmark.open (arg = url/title fragment),
+  --   config.reload, app.quit
   keys = {
     { "ctrl+t",        "page.new" },
     { "ctrl+shift+t",  "page.new_beside" },
@@ -59,6 +60,7 @@ return {
     { "ctrl+r",        "page.reload" },
     { "ctrl+shift+r",  "page.reload_bypass_cache" },
     { "ctrl+k",        "focus.url" },          -- prompt: address or search
+    { "ctrl+d",        "bookmark.toggle" },    -- bookmark / unbookmark this page
     { "ctrl+pagedown", "page.next" },
     { "ctrl+pageup",   "page.prev" },
     { "ctrl+1",        "workspace.focus", arg = "1" },

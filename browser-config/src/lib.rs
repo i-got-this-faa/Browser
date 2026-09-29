@@ -140,6 +140,7 @@ pub fn default_keys() -> Vec<Keybind> {
         kb("ctrl+w", "page.close"),
         kb("ctrl+r", "page.reload"),
         kb("ctrl+i", "focus.url"),
+        kb("ctrl+d", "bookmark.toggle"),
         kb("ctrl+shift+r", "page.reload_bypass_cache"),
         kb("alt+left", "page.back"),
         kb("alt+right", "page.forward"),
