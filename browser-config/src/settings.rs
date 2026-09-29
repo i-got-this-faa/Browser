@@ -57,13 +57,19 @@ pub enum Scalar {
 }
 
 impl Scalar {
-    /// Text the GUI shows and edits. Numbers print at f32 precision: every
-    /// numeric config field is an f32/u32, so `0.18` never shows as
-    /// `0.18000000715`.
+    /// A number at f32 precision: every numeric config field is an f32/u32,
+    /// so `0.18` stays `0.18` (not `0.18000000715`) and `0.18 + 0.01` stays
+    /// `0.19`. Every constructor path goes through here, which also keeps
+    /// the written block and the value read back from it equal.
+    pub fn num(n: f64) -> Self {
+        Scalar::Num((n as f32).to_string().parse().unwrap_or(n))
+    }
+
+    /// Text the GUI shows and edits.
     pub fn display(&self) -> String {
         match self {
             Scalar::Bool(b) => b.to_string(),
-            Scalar::Num(n) => (*n as f32).to_string(),
+            Scalar::Num(n) => n.to_string(),
             Scalar::Str(s) => s.clone(),
         }
     }
@@ -118,7 +124,7 @@ impl Kind {
                 _ => bail!("expected true or false"),
             },
             Kind::Int | Kind::Float => {
-                Scalar::Num(t.parse::<f64>().map_err(|_| anyhow!("expected a number"))?)
+                Scalar::num(t.parse::<f64>().map_err(|_| anyhow!("expected a number"))?)
             }
             Kind::Color | Kind::Text => Scalar::Str(t.to_string()),
         };
@@ -182,7 +188,7 @@ pub fn fields(cfg: &Config) -> Vec<Field> {
             let Some(kind) = Kind::of(section, &v) else { continue };
             let value = match &v {
                 serde_json::Value::Bool(b) => Scalar::Bool(*b),
-                serde_json::Value::Number(n) => Scalar::Num(n.as_f64().unwrap_or_default()),
+                serde_json::Value::Number(n) => Scalar::num(n.as_f64().unwrap_or_default()),
                 serde_json::Value::String(s) => Scalar::Str(s.clone()),
                 _ => continue,
             };
@@ -234,6 +240,10 @@ impl Overrides {
     pub fn apply(&mut self, edit: Edit) -> Result<()> {
         match edit {
             Edit::Set { section, key, value } => {
+                let value = match value {
+                    Scalar::Num(n) => Scalar::num(n),
+                    other => other,
+                };
                 let defaults = fields(&Config::default());
                 let field = defaults
                     .iter()
@@ -353,8 +363,8 @@ fn scalar_map(t: &Table) -> Result<BTreeMap<String, Scalar>> {
         let (k, v) = pair?;
         let scalar = match v {
             Value::Boolean(b) => Scalar::Bool(b),
-            Value::Integer(i) => Scalar::Num(i as f64),
-            Value::Number(n) => Scalar::Num(n),
+            Value::Integer(i) => Scalar::num(i as f64),
+            Value::Number(n) => Scalar::num(n),
             Value::String(s) => Scalar::Str(s.to_str()?.to_string()),
             other => bail!("{GLOBAL}.{k} must be a bool, number or string, got {}", other.type_name()),
         };

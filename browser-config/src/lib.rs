@@ -162,6 +162,7 @@ pub fn default_keys() -> Vec<Keybind> {
         kb("ctrl+shift+p", "palette.open"),
         kb("ctrl+p", "palette.open"),
         kb("ctrl+shift+e", "config.reload"),
+        kb("ctrl+,", "settings.open"),
         kb("ctrl+q", "app.quit"),
     ]
 }

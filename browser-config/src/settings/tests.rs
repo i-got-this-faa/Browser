@@ -84,6 +84,18 @@ fn keys_are_replaced_as_a_whole_list_and_round_trip() {
 }
 
 #[test]
+fn nudged_floats_round_trip() {
+    let dir = temp_dir("float");
+    let path = dir.join("browser.lua");
+    std::fs::write(&path, "return {}").unwrap();
+    let v = Scalar::Num(0.18 + 0.01); // 0.19000000000000003 before normalizing
+    apply_edit(&path, set(Section::Behavior, "smooth_scroll", v)).unwrap();
+    assert!(std::fs::read_to_string(&path).unwrap().contains("smooth_scroll = 0.19,"));
+    assert_eq!(Config::load(&path).unwrap().behavior.smooth_scroll, 0.19);
+    std::fs::remove_dir_all(dir).ok();
+}
+
+#[test]
 fn awkward_strings_survive() {
     let dir = temp_dir("strings");
     let path = dir.join("browser.lua");
