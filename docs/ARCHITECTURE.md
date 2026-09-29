@@ -76,7 +76,11 @@ uBlock integration). `webview-cdp` already isolates this behind the
 2. Overlay first (prompt/palette capture keys), then config keybindings,
    then leftovers forwarded to the page via `Input.dispatchKeyEvent`.
 3. Mouse: page hit-test from strip geometry → page-local coordinates →
-   `Input.dispatchMouseEvent`; wheel → `mouseWheel`.
+   the engine's mouse event (CEF `SendMouseEvent`, CDP `Input.dispatchMouseEvent`).
+4. Wheel: each GPUI wheel event goes to the page at once, with no shell-side
+   smoothing. Chromium runs the only scroll animation, as in Chrome. A notch is
+   3 lines × 40 px = 120 px. `WebViewCommand::Scroll` uses the DOM sign
+   (positive `dy` scrolls down), and the CEF adapter flips it for CEF.
 
 ## Hot reload
 

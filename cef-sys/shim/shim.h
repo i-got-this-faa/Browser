@@ -91,7 +91,7 @@ void cef_view_hidden(void *view, int hidden);
 // Mouse: kind 0=move 1=down 2=up; button 0=left 1=middle 2=right.
 void cef_view_mouse(void *view, int kind, int button, int x, int y,
                     int click_count, int modifiers);
-// Wheel in pixels.
+// Wheel in pixels, CEF convention: positive dy scrolls up (toward the top).
 void cef_view_wheel(void *view, int x, int y, int dx, int dy);
 
 // Keyboard: type = cef_key_event_type_t (0=RAWKEYDOWN 1=KEYDOWN 2=KEYUP

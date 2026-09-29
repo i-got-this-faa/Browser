@@ -28,14 +28,21 @@ use gpui::{
 };
 use std::sync::Arc;
 
-#[derive(Default)]
-struct ScrollPhysics {
-    accum_x: f32,
-    accum_y: f32,
-    vel_x: f32,
-    vel_y: f32,
-    last_x: i32,
-    last_y: i32,
+/// Chromium scrolls 40 px per wheel line; GPUI reports 3 lines per notch, so
+/// a notch moves 120 px, the same as Chrome/Helium.
+const WHEEL_LINE_PX: f32 = 40.0;
+
+/// Converts a GPUI wheel delta to whole pixels in the page's convention
+/// (positive = scroll down). GPUI's y is positive for wheel-up, and CEF takes
+/// integers, so the fractional rest of touchpad deltas carries into the next
+/// event instead of being dropped.
+fn wheel_pixels(carry: &mut Point<f32>, delta: Point<Pixels>) -> (i32, i32) {
+    carry.x -= f32::from(delta.x);
+    carry.y -= f32::from(delta.y);
+    let whole = (carry.x.trunc(), carry.y.trunc());
+    carry.x -= whole.0;
+    carry.y -= whole.1;
+    (whole.0 as i32, whole.1 as i32)
 }
 
 fn to_gpui_cursor(cur: webview_cdp::WebCursor) -> CursorStyle {
@@ -199,7 +206,8 @@ struct Shell {
     focus_cache: HashMap<u64, bool>,
     wayland_active: bool,
     page_cursors: HashMap<u64, CursorStyle>,
-    scroll_physics: HashMap<u64, ScrollPhysics>,
+    /// Sub-pixel wheel remainder per page (see `wheel_pixels`).
+    wheel_carry: HashMap<u64, Point<f32>>,
     last_mouse_page: Option<u64>,
 }
 
@@ -369,7 +377,7 @@ impl Shell {
             focus_cache: HashMap::new(),
             wayland_active,
             page_cursors: HashMap::new(),
-            scroll_physics: HashMap::new(),
+            wheel_carry: HashMap::new(),
             last_mouse_page: None,
         };
         shell.reload_lua(cx);
@@ -379,11 +387,9 @@ impl Shell {
         }
         shell.ensure_first_page(cx);
 
-        // Event-driven frame pump: awaits browser_core::wakeslot::frame_wake()
-        // instead of ticking an unsynchronized 60Hz timer. When animation is in
-        // flight (smooth scroll, kinetic scrolling, toast), it ticks aligned
-        // with the monitor's native refresh rate (e.g. 144Hz = ~6.94ms) to
-        // eliminate 3:2 pulldown judder. When idle, long timeout allows zero CPU.
+        // Event-driven frame pump: awaits browser_core::wakeslot::frame_wake().
+        // While a strip scroll or toast is animating it also ticks at the
+        // target refresh rate; when idle the long timeout means zero CPU.
         cx.spawn(async move |this, cx| loop {
             let (animate, target_fps) = this
                 .update(cx, |this, _| {
@@ -432,10 +438,6 @@ impl Shell {
                 60
             }
         }
-    }
-
-    fn has_kinetic_scroll(&self) -> bool {
-        self.scroll_physics.values().any(|p| p.vel_x.abs() > 0.5 || p.vel_y.abs() > 0.5)
     }
 
     // -- config / lua -------------------------------------------------------
@@ -601,9 +603,7 @@ impl Shell {
         }
         for id in fx.close.drain(..) {
             self.engine.close_page(id);
-            self.view_sizes.remove(&id);
-            self.retire_surface(id, cx);
-            self.focus_cache.remove(&id);
+            self.forget_page(id, cx);
         }
         if std::mem::take(&mut fx.bookmarks_changed) {
             if let Err(e) = self.state.bookmarks.save(&bookmarks_path()) {
@@ -755,32 +755,6 @@ impl Shell {
             dirty = true;
         }
 
-        // Kinetic scrolling physics step (smooth subpixel deceleration)
-        for (page_id, physics) in self.scroll_physics.iter_mut() {
-            if physics.vel_x.abs() > 0.5 || physics.vel_y.abs() > 0.5 {
-                physics.accum_x += physics.vel_x * 0.35;
-                physics.accum_y += physics.vel_y * 0.35;
-                physics.vel_x *= 0.88;
-                physics.vel_y *= 0.88;
-                if physics.vel_x.abs() < 0.5 { physics.vel_x = 0.0; }
-                if physics.vel_y.abs() < 0.5 { physics.vel_y = 0.0; }
-
-                let step_x = physics.accum_x.trunc() as i32;
-                if step_x != 0 {
-                    physics.accum_x -= step_x as f32;
-                }
-                let step_y = physics.accum_y.trunc() as i32;
-                if step_y != 0 {
-                    physics.accum_y -= step_y as f32;
-                }
-
-                if step_x != 0 || step_y != 0 {
-                    self.engine.scroll(*page_id, physics.last_x, physics.last_y, step_x, step_y);
-                    dirty = true;
-                }
-            }
-        }
-
         // Toast lifetime is wall-clock now: the pump only runs when kicked,
         // so frame-counting would freeze the countdown while idle.
         if let Overlay::Toast { .. } = &self.overlay {
@@ -800,11 +774,20 @@ impl Shell {
     /// while a smooth scroll is in flight, or while a toast is counting down.
     /// None means fully idle — the pump then waits for the next kick.
     fn animation_deadline(&self) -> Option<std::time::Instant> {
-        if self.scroll_target.is_some() || self.toast_deadline.is_some() || self.has_kinetic_scroll() {
+        if self.scroll_target.is_some() || self.toast_deadline.is_some() {
             Some(std::time::Instant::now())
         } else {
             None
         }
+    }
+
+    /// Drops every piece of per-page shell state once a page is gone.
+    fn forget_page(&mut self, id: u64, cx: &mut Context<Self>) {
+        self.retire_surface(id, cx);
+        self.view_sizes.remove(&id);
+        self.focus_cache.remove(&id);
+        self.page_cursors.remove(&id);
+        self.wheel_carry.remove(&id);
     }
 
     /// Drain engine events; returns true when anything was handled so the
@@ -880,11 +863,7 @@ impl Shell {
                     if self.state.close_page(page_id, &self.viewport).is_some() {
                         self.engine.close_page(page_id);
                     }
-                    self.retire_surface(page_id, cx);
-                    self.view_sizes.remove(&page_id);
-                    self.focus_cache.remove(&page_id);
-                    self.page_cursors.remove(&page_id);
-                    self.scroll_physics.remove(&page_id);
+                    self.forget_page(page_id, cx);
                     dirty = true;
                 }
             }
@@ -1289,44 +1268,17 @@ impl Shell {
         }
     }
 
-    fn on_scroll(&mut self, ev: &ScrollWheelEvent, _window: &mut Window, cx: &mut Context<Self>) {
-        if let Some((id, local)) = self.page_under(ev.position) {
-            let lx = f32::from(local.x) as i32;
-            let ly = f32::from(local.y) as i32;
-            let is_precise = ev.delta.precise();
-            let physics = self.scroll_physics.entry(id).or_default();
-            physics.last_x = lx;
-            physics.last_y = ly;
-
-            if is_precise {
-                // Continuous touchpad gesture: accumulate exact subpixel deltas without friction fight
-                let d = ev.delta.pixel_delta(px(20.0));
-                physics.accum_x += f32::from(d.x);
-                physics.accum_y += f32::from(d.y);
-
-                let step_x = physics.accum_x.trunc() as i32;
-                if step_x != 0 {
-                    physics.accum_x -= step_x as f32;
-                }
-                let step_y = physics.accum_y.trunc() as i32;
-                if step_y != 0 {
-                    physics.accum_y -= step_y as f32;
-                }
-
-                if step_x != 0 || step_y != 0 {
-                    self.engine.scroll(id, lx, ly, step_x, step_y);
-                }
-            } else {
-                // Discrete mouse wheel notch: smooth continuous momentum dispersion
-                let d = ev.delta.pixel_delta(px(28.0));
-                let dx = f32::from(d.x);
-                let dy = f32::from(d.y);
-
-                // Add to velocity impulse for kinetic decay across frames
-                physics.vel_x = (physics.vel_x * 0.5 + dx * 0.5).clamp(-160.0, 160.0);
-                physics.vel_y = (physics.vel_y * 0.5 + dy * 0.5).clamp(-160.0, 160.0);
-            }
-            cx.notify();
+    /// Wheel and touchpad input go straight to the page. Chromium runs the
+    /// only smooth-scroll animation, as in Chrome; the shell adds none, so a
+    /// notch reaches the page in the same input event that produced it.
+    fn on_scroll(&mut self, ev: &ScrollWheelEvent, _window: &mut Window, _cx: &mut Context<Self>) {
+        let Some((id, local)) = self.page_under(ev.position) else {
+            return;
+        };
+        let carry = self.wheel_carry.entry(id).or_default();
+        let (dx, dy) = wheel_pixels(carry, ev.delta.pixel_delta(px(WHEEL_LINE_PX)));
+        if dx != 0 || dy != 0 {
+            self.engine.scroll(id, f32::from(local.x) as i32, f32::from(local.y) as i32, dx, dy);
         }
     }
 }
@@ -1721,12 +1673,12 @@ impl Shell {
                 .overflow_hidden()
                 .on_scroll_wheel(cx.listener(
                     |this: &mut Self, ev: &gpui::ScrollWheelEvent, _window: &mut Window, cx| {
-                    // Wayland axis convention: positive y = wheel down.
+                    // GPUI convention: positive y = wheel up.
                     let dy = f32::from(ev.delta.pixel_delta(px(20.0)).y);
                     if dy > 0.5 {
-                        this.palette_move(1);
-                    } else if dy < -0.5 {
                         this.palette_move(-1);
+                    } else if dy < -0.5 {
+                        this.palette_move(1);
                     }
                     cx.notify();
                 }))
@@ -1859,5 +1811,27 @@ fn hex(s: &str) -> gpui::Hsla {
     match gpui::Rgba::try_from(s) {
         Ok(rgba) => gpui::Hsla::from(rgba),
         Err(_) => gpui::black(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn wheel_notch_is_120px_and_wheel_up_scrolls_up() {
+        let mut carry = Point::default();
+        let notch_down = gpui::ScrollDelta::Lines(gpui::point(0.0, -3.0));
+        assert_eq!(wheel_pixels(&mut carry, notch_down.pixel_delta(px(WHEEL_LINE_PX))), (0, 120));
+        let notch_up = gpui::ScrollDelta::Lines(gpui::point(0.0, 3.0));
+        assert_eq!(wheel_pixels(&mut carry, notch_up.pixel_delta(px(WHEEL_LINE_PX))), (0, -120));
+    }
+
+    #[test]
+    fn touchpad_fractions_carry_instead_of_dropping() {
+        let mut carry = Point::default();
+        let step = gpui::point(px(0.0), px(-0.4));
+        let total: i32 = (0..10).map(|_| wheel_pixels(&mut carry, step).1).sum();
+        assert_eq!(total, 4);
     }
 }

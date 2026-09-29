@@ -32,6 +32,8 @@ pub enum WebViewCommand {
     GoForward,
     Resize { width: u32, height: u32 },
     Mouse { x: i32, y: i32, kind: MouseKind, button: MouseButton, mods: InputMods },
+    /// Wheel in CSS pixels, DOM `WheelEvent` convention: positive `dy`
+    /// scrolls toward the end of the page, positive `dx` to the right.
     Scroll { x: i32, y: i32, dx: i32, dy: i32 },
     Keys(Vec<KeyInput>),
     SetFocus(bool),
