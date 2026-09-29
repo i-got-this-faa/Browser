@@ -32,7 +32,8 @@ backend.
 | `ctrl+n` / `ctrl+shift+n` | next / previous page |
 | `alt+left` / `alt+right` | back / forward |
 | `ctrl+r` / `ctrl+shift+r` | reload / reload bypassing cache |
-| `ctrl+k` | prompt: URL, search, or `:command` |
+| `ctrl+k` | prompt: URL, search, bookmark, or `:command` |
+| `ctrl+d` | bookmark / unbookmark the page |
 | `ctrl+p` | command palette |
 | `ctrl+1..4` | focus workspace |
 | `ctrl+shift+1..2` | send page to workspace |

@@ -27,16 +27,17 @@ to bootstrap.
 |---|---|---|
 | `help` | – | every command + descriptions + socket path |
 | `state` | – | compact snapshot (legacy shape, stable) |
-| `get_state` | – | **full snapshot**: per-page url/title/workspace/webview/loading + on-screen geometry + viewport + overlay |
+| `get_state` | – | **full snapshot**: per-page url/title/workspace/webview/loading/bookmarked + on-screen geometry + viewport + overlay |
 | `page_geometry` | `[id\|active\|url-substr]` | one page's on-screen rect + center |
 | `config.get` | – | theme + behavior + keybindings as JSON |
 | `screenshot` | `[id\|active\|url-substr]` | PNG of the page's latest frame, base64 |
+| `bookmarks` | `[query]` | `{"bookmarks":[{"url","title"}]}`, newest first; `query` filters by title/URL |
 
 ### Act
 
 | cmd | arg | notes |
 |---|---|---|
-| `open` | `url` | new page on the active workspace, focused, navigated — one round trip |
+| `open` | `url-or-query` | new page on the active workspace, focused, navigated — one round trip. Typed text is resolved like the prompt: `google.com` → `https://google.com`, `localhost:3000` → `http://localhost:3000`, `rust gpui` → a search (rules in [CONFIG.md](CONFIG.md#how-typed-text-becomes-a-url)) |
 | `click` | `x y [sel] [left\|middle\|right]` | page-local coords (from `get_state` geometry); focuses the page first, exactly like a real click |
 | `type` | `text [@sel]` | keyboard-types printable text |
 | `key` | `ctrl+shift+a [@sel]` | one keystroke with modifiers |
@@ -44,7 +45,7 @@ to bootstrap.
 | `scroll_to` | `sel` | center the strip on a page (instant) |
 | `overlay` | `get\|none\|prompt\|palette` | read/close the shell overlays |
 | `toast` | `text` | visible confirmation for humans watching |
-| `exec` | any typed command | `page.new_beside`, `focus.left`, `workspace.focus 3`, `overview.toggle`, `config.reload`, `app.quit`, … (`help` lists all) |
+| `exec` | any typed command | `page.new_beside`, `focus.left`, `workspace.focus 3`, `overview.toggle`, `bookmark.toggle`, `bookmark.open rust`, `config.reload`, `app.quit`, … (`help` lists all). `page.navigate <text>` resolves like `open` |
 | `key` (shell) | `ctrl+k` | synthesize a real keystroke through the shell's key routing |
 | `quit` | – | close the browser |
 
