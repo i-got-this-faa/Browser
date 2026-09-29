@@ -9,6 +9,8 @@ see and touch is a Rust + GPUI shell driven by one Lua file.
 - Dynamic workspaces stacked vertically; `ctrl+1..4` to jump.
 - Keyboard-first: prompt (`ctrl+k`), palette (`ctrl+p`), no tab bar required.
 - The whole experience is `~/.config/strip-browser/browser.lua` — hot reload on save.
+- Or configure it from the settings page (`ctrl+,`): theme, behavior and keybindings,
+  written back to that same file.
 
 ## Run
 
@@ -37,16 +39,22 @@ backend.
 | `ctrl+1..4` | focus workspace |
 | `ctrl+shift+1..2` | send page to workspace |
 | `ctrl+o` | overview |
+| `ctrl+,` | settings page (`strip://settings`) |
 | `ctrl+shift+e` | reload browser.lua |
 | `ctrl+q` | quit |
 
-All redefinable in `browser.lua` (`keys = {}` disables every default).
+All redefinable in `browser.lua` (`keys = {}` disables every default), or from the
+settings page. A `browser.lua` written before `ctrl+,` existed has its own `keys`
+table and needs `{ "ctrl+,", "settings.open" }` added; `:settings.open` in the
+prompt, the palette and the agent API work regardless.
 
 ## Documentation
 
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — data flow, crate map,
   reused vs new code, frame/input paths.
-- [docs/CONFIG.md](docs/CONFIG.md) — full `browser.lua` reference.
+- [docs/CONFIG.md](docs/CONFIG.md) — full `browser.lua` reference, including the
+  settings page and the block it owns.
+- [docs/AGENT_API.md](docs/AGENT_API.md) — drive the browser over the control socket.
 - `decisions.tsv` — decision log with evidence.
 
 ## License

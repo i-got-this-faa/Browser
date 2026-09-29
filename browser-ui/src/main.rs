@@ -1253,7 +1253,8 @@ impl Shell {
             return;
         };
         if self.is_settings_page(id) {
-            self.settings.scroll_by(f32::from(ev.delta.pixel_delta(px(WHEEL_LINE_PX)).y));
+            // GPUI's y is positive for wheel-up; the list offset grows downward.
+            self.settings.scroll_by(-f32::from(ev.delta.pixel_delta(px(WHEEL_LINE_PX)).y));
             cx.notify();
             return;
         }

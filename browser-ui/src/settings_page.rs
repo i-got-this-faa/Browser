@@ -20,7 +20,7 @@ use gpui::{div, prelude::*, px, Context, MouseButton, SharedString};
 
 const ROW_H: f32 = 28.0;
 /// Title + status area above the list, hint line below it.
-const TOP_H: f32 = 56.0;
+const TOP_H: f32 = 64.0;
 const FOOT_H: f32 = 30.0;
 
 // ---------------------------------------------------------------------------

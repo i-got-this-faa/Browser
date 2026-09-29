@@ -89,6 +89,17 @@ pending events each frame, re-reads the file, re-parses, re-binds Lua, and
 fires `config_reloaded`. A broken file shows a toast and keeps the old
 config.
 
+## Settings page
+
+`strip://settings` is a page on the strip with no web view: `ops::open_settings`
+creates or refocuses it, the shell draws it in the page's frame
+(`browser-ui/src/settings_page.rs`), and the key router hands it the keyboard
+while it is active. Each change is one `browser_config::settings::Edit`
+applied to the active `browser.lua` (a marked, generated block; atomic write);
+the file watcher reloads it like any other edit and the page re-renders from
+the reloaded `Config`. There is no second store and no bridge. See
+docs/CONFIG.md for the block format.
+
 ## Workspaces
 
 `Strip` holds workspaces in a vertical stack (dynamic; `ctrl+1..4`,
