@@ -12,6 +12,8 @@ pub struct TabInfo {
     pub title: String,
     pub workspace: u64,
     pub active: bool,
+    pub audio_playing: bool,
+    pub muted: bool,
 }
 
 /// What the snapshot contains; also the payload for tab-related events.

@@ -30,6 +30,9 @@ return {
     smooth_scroll       = 0.18,   -- per-frame easing fraction (0.05 slow .. 1 instant)
     show_page_bar       = true,   -- top strip of page chips
     show_status_bar     = true,   -- bottom bar: workspaces + url
+    width_presets       = { 1/3, 1/2, 2/3 },  -- page.width_preset cycles these (viewport shares)
+    overview_scale      = 0.5,    -- zoom of the overview (0.2 .. 0.9)
+    overview_gap        = 48,     -- px between workspaces in the overview
   },
 
   -- Every default binding can be replaced here. Full command list:
@@ -38,8 +41,10 @@ return {
   --   focus.right, focus.up, focus.down, page.move_left, page.move_right,
   --   page.next, page.prev, workspace.new, workspace.next, workspace.prev,
   --   workspace.focus (arg = n), page.to_workspace (arg = n),
-  --   overview.toggle, layout.scroll_left, layout.scroll_right,
-  --   palette.open, config.reload, app.quit
+  --   page.to_workspace_up, page.to_workspace_down, page.mute_toggle,
+  --   page.width_preset, page.width_decrease, page.width_increase,
+  --   page.maximize, overview.toggle, layout.scroll_left,
+  --   layout.scroll_right, palette.open, config.reload, app.quit
   keys = {
     { "ctrl+t",        "page.new" },
     { "ctrl+shift+t",  "page.new_beside" },
@@ -59,18 +64,31 @@ return {
     { "ctrl+r",        "page.reload" },
     { "ctrl+shift+r",  "page.reload_bypass_cache" },
     { "ctrl+k",        "focus.url" },          -- prompt: address or search
-    { "ctrl+pagedown", "page.next" },
-    { "ctrl+pageup",   "page.prev" },
+    { "ctrl+pagedown", "focus.down" },         -- workspace below
+    { "ctrl+pageup",   "focus.up" },           -- workspace above
+    { "ctrl+u",        "focus.down" },
+    { "ctrl+i",        "focus.up" },
+    { "ctrl+shift+pagedown", "page.to_workspace_down" },
+    { "ctrl+shift+pageup",   "page.to_workspace_up" },
+    { "ctrl+shift+u",  "page.to_workspace_down" },
+    { "ctrl+shift+i",  "page.to_workspace_up" },
     { "ctrl+1",        "workspace.focus", arg = "1" },
     { "ctrl+2",        "workspace.focus", arg = "2" },
     { "ctrl+3",        "workspace.focus", arg = "3" },
     { "ctrl+4",        "workspace.focus", arg = "4" },
     { "ctrl+shift+1",  "page.to_workspace", arg = "1" },
     { "ctrl+shift+2",  "page.to_workspace", arg = "2" },
+    { "ctrl+shift+3",  "page.to_workspace", arg = "3" },
+    { "ctrl+shift+4",  "page.to_workspace", arg = "4" },
+    { "ctrl+m",        "page.mute_toggle" },
+    { "ctrl+alt+r",    "page.width_preset" },  -- 1/3, 1/2, 2/3 (ctrl+r reloads)
+    { "ctrl+alt+-",    "page.width_decrease" },-- ctrl+-/= stay free for page zoom
+    { "ctrl+alt+=",    "page.width_increase" },
+    { "ctrl+alt+f",    "page.maximize" },
     { "ctrl+o",        "overview.toggle" },
     { "ctrl+shift+o",  "overview.toggle" },
-    { "ctrl+shift+p",  "palette.open" },
     { "ctrl+p",        "palette.open" },
+    { "ctrl+shift+p",  "palette.open" },
     { "ctrl+shift+e",  "config.reload" },
     { "ctrl+q",        "app.quit" },
   },

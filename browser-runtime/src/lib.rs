@@ -51,6 +51,18 @@ pub enum Request {
     WorkspaceFocus(u32),
     /// Send the active page to workspace n (1-based).
     PageToWorkspace(u32),
+    /// Send the active page to the workspace above / below; the view follows.
+    PageToWorkspaceUp,
+    PageToWorkspaceDown,
+    /// Mute or unmute the active page.
+    PageMuteToggle,
+    /// Cycle the active page through the configured width presets.
+    PageWidthPreset,
+    /// Shrink / grow the active page by 10% of the viewport.
+    PageWidthDecrease,
+    PageWidthIncrease,
+    /// Toggle the active page between its width and the full viewport.
+    PageMaximize,
     OverviewToggle,
     ScrollLeft,
     ScrollRight,
@@ -91,6 +103,13 @@ impl Request {
             Request::WorkspacePrev => "workspace.prev",
             Request::WorkspaceFocus(_) => "workspace.focus",
             Request::PageToWorkspace(_) => "page.to_workspace",
+            Request::PageToWorkspaceUp => "page.to_workspace_up",
+            Request::PageToWorkspaceDown => "page.to_workspace_down",
+            Request::PageMuteToggle => "page.mute_toggle",
+            Request::PageWidthPreset => "page.width_preset",
+            Request::PageWidthDecrease => "page.width_decrease",
+            Request::PageWidthIncrease => "page.width_increase",
+            Request::PageMaximize => "page.maximize",
             Request::OverviewToggle => "overview.toggle",
             Request::ScrollLeft => "layout.scroll_left",
             Request::ScrollRight => "layout.scroll_right",
@@ -127,6 +146,13 @@ impl Request {
             "workspace.prev" => Request::WorkspacePrev,
             "workspace.focus" => Request::WorkspaceFocus(arg?.parse().ok()?),
             "page.to_workspace" => Request::PageToWorkspace(arg?.parse().ok()?),
+            "page.to_workspace_up" => Request::PageToWorkspaceUp,
+            "page.to_workspace_down" => Request::PageToWorkspaceDown,
+            "page.mute_toggle" => Request::PageMuteToggle,
+            "page.width_preset" => Request::PageWidthPreset,
+            "page.width_decrease" => Request::PageWidthDecrease,
+            "page.width_increase" => Request::PageWidthIncrease,
+            "page.maximize" => Request::PageMaximize,
             "overview.toggle" => Request::OverviewToggle,
             "layout.scroll_left" => Request::ScrollLeft,
             "layout.scroll_right" => Request::ScrollRight,
@@ -154,16 +180,23 @@ impl Request {
             ("focus.right", "Focus the page to the right"),
             ("focus.up", "Focus the workspace above"),
             ("focus.down", "Focus the workspace below"),
+            ("page.mute_toggle", "Mute or unmute the active page"),
+            ("page.width_preset", "Cycle the page width presets (1/3, 1/2, 2/3)"),
+            ("page.width_decrease", "Make the page 10% narrower"),
+            ("page.width_increase", "Make the page 10% wider"),
+            ("page.maximize", "Toggle the page between its width and full width"),
             ("page.move_left", "Move the page one slot left"),
             ("page.move_right", "Move the page one slot right"),
             ("page.next", "Focus the next page on the strip"),
             ("page.prev", "Focus the previous page on the strip"),
-            ("workspace.new", "Create a workspace"),
-            ("workspace.next", "Focus the next workspace"),
-            ("workspace.prev", "Focus the previous workspace"),
-            ("workspace.focus", "Focus workspace n"),
+            ("workspace.new", "Focus the empty workspace at the bottom"),
+            ("workspace.next", "Focus the workspace below"),
+            ("workspace.prev", "Focus the workspace above"),
+            ("workspace.focus", "Focus workspace n (counted from the top)"),
             ("page.to_workspace", "Send the page to workspace n"),
-            ("overview.toggle", "Toggle the workspace overview"),
+            ("page.to_workspace_up", "Send the page to the workspace above and follow it"),
+            ("page.to_workspace_down", "Send the page to the workspace below and follow it"),
+            ("overview.toggle", "Toggle the zoomed-out overview of all workspaces"),
             ("layout.scroll_left", "Scroll the strip left"),
             ("layout.scroll_right", "Scroll the strip right"),
             ("palette.open", "Open the command palette"),
@@ -433,6 +466,22 @@ mod tests {
     }
 
     #[test]
+    fn new_commands_take_no_argument() {
+        for (name, req) in [
+            ("page.mute_toggle", Request::PageMuteToggle),
+            ("page.width_preset", Request::PageWidthPreset),
+            ("page.width_decrease", Request::PageWidthDecrease),
+            ("page.width_increase", Request::PageWidthIncrease),
+            ("page.maximize", Request::PageMaximize),
+            ("page.to_workspace_up", Request::PageToWorkspaceUp),
+            ("page.to_workspace_down", Request::PageToWorkspaceDown),
+        ] {
+            assert_eq!(Request::from_command(name, None), Some(req.clone()));
+            assert_eq!(req.name(), name);
+        }
+    }
+
+    #[test]
     fn lua_request_positional_and_named() {
         let mut host = LuaHost::new();
         let mut out = Vec::new();
@@ -525,6 +574,8 @@ mod tests {
                 title: "t".into(),
                 workspace: 1,
                 active: true,
+                audio_playing: false,
+                muted: false,
             }],
             active_workspace: 1,
         })
