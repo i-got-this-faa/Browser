@@ -39,7 +39,7 @@ return {
   --   page.next, page.prev, workspace.new, workspace.next, workspace.prev,
   --   workspace.focus (arg = n), page.to_workspace (arg = n),
   --   overview.toggle, layout.scroll_left, layout.scroll_right,
-  --   palette.open, config.reload, app.quit
+  --   palette.open, settings.open, config.reload, app.quit
   keys = {
     { "ctrl+t",        "page.new" },
     { "ctrl+shift+t",  "page.new_beside" },
@@ -71,6 +71,7 @@ return {
     { "ctrl+shift+o",  "overview.toggle" },
     { "ctrl+shift+p",  "palette.open" },
     { "ctrl+p",        "palette.open" },
+    { "ctrl+,",        "settings.open" },      -- settings page (edits the block at the top of this file)
     { "ctrl+shift+e",  "config.reload" },
     { "ctrl+q",        "app.quit" },
   },

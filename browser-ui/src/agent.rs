@@ -82,6 +82,16 @@ pub fn help_json(shell: &Shell) -> String {
             "-",
             "theme + behavior + keybindings as JSON (what browser.lua set)",
         ),
+        (
+            "settings.get",
+            "-",
+            "every editable setting: value, kind, whether the settings block overrides it, last error",
+        ),
+        (
+            "settings.set",
+            "section.key value",
+            "edit one theme/behavior value in browser.lua's settings block (hot-reloads)",
+        ),
         ("quit", "-", "close the browser"),
     ];
     let mut commands: Vec<Value> = native
@@ -424,7 +434,8 @@ pub fn handle(
 ) -> Option<String> {
     let reply = match cmd {
         "help" | "get_state" | "page_geometry" | "click" | "type" | "key" | "wheel"
-        | "screenshot" | "open" | "scroll_to" | "overlay" | "toast" | "config.get" => {
+        | "screenshot" | "open" | "scroll_to" | "overlay" | "toast" | "config.get"
+        | "settings.get" | "settings.set" => {
             dispatch(shell, cmd, arg, cx)
         }
         _ => return None,
@@ -445,6 +456,8 @@ fn dispatch(
         "help" => Ok(serde_json::from_str(&help_json(shell)).unwrap_or_default()),
         "get_state" => Ok(serde_json::from_str(&agent_state_json(shell)).unwrap_or_default()),
         "config.get" => Ok(serde_json::from_str(&config_json(shell)).unwrap_or_default()),
+        "settings.get" => Ok(shell.settings_json()),
+        "settings.set" => shell.settings_set(arg),
         "page_geometry" => page_geometry(shell, arg),
         "click" => {
             let mut it = arg.split_whitespace();
