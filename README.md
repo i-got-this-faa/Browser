@@ -6,7 +6,11 @@ see and touch is a Rust + GPUI shell driven by one Lua file.
 
 - Pages are first-class surfaces on an infinite horizontal strip.
 - Opening a page never resizes another page.
-- Dynamic workspaces stacked vertically; `ctrl+1..4` to jump.
+- Dynamic workspaces stacked vertically, niri style: one empty workspace
+  always waits at the bottom; `ctrl+u` / `ctrl+i` move between them.
+- Resize a page like a niri column (presets, +/-10%, maximize) without
+  touching its neighbors; `ctrl+o` zooms out to an overview of everything.
+- Pages can play audio; a note in the page bar shows it, `ctrl+m` mutes.
 - Keyboard-first: prompt (`ctrl+k`), palette (`ctrl+p`), no tab bar required.
 - The whole experience is `~/.config/strip-browser/browser.lua` — hot reload on save.
 
@@ -34,11 +38,21 @@ backend.
 | `ctrl+r` / `ctrl+shift+r` | reload / reload bypassing cache |
 | `ctrl+k` | prompt: URL, search, or `:command` |
 | `ctrl+p` | command palette |
-| `ctrl+1..4` | focus workspace |
-| `ctrl+shift+1..2` | send page to workspace |
-| `ctrl+o` | overview |
+| `ctrl+u` / `ctrl+i`, `ctrl+pagedown` / `ctrl+pageup` | focus workspace below / above |
+| `ctrl+1..4` | focus workspace n (counted from the top) |
+| `ctrl+shift+u` / `ctrl+shift+i`, `ctrl+shift+pagedown` / `ctrl+shift+pageup` | move page to workspace below / above (focus follows) |
+| `ctrl+shift+1..4` | send page to workspace n (focus stays) |
+| `ctrl+alt+r` | cycle page width presets (1/3, 1/2, 2/3) |
+| `ctrl+alt+-` / `ctrl+alt+=` | page 10% narrower / wider |
+| `ctrl+alt+f` | maximize page (toggle) |
+| `ctrl+m` | mute / unmute page |
+| `ctrl+o` | overview (see below) |
 | `ctrl+shift+e` | reload browser.lua |
 | `ctrl+q` | quit |
+
+Overview: `h j k l` or the arrow keys move focus between pages and
+workspaces, `enter` / `escape` / `ctrl+o` leave, a click focuses a page (or
+workspace) and leaves, the wheel moves between workspaces.
 
 All redefinable in `browser.lua` (`keys = {}` disables every default).
 
