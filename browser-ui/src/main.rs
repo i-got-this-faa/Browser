@@ -11,6 +11,7 @@ mod control;
 mod engine;
 mod overview;
 mod settings_page;
+mod omnibox;
 mod trace;
 
 use anyhow::{Context as _, Result};
@@ -18,7 +19,8 @@ use browser_config::{config_path, ensure_default_config, watch_config, Config, W
 use browser_core::{perf_event, perf_span};
 use std::collections::HashMap;
 use browser_layout::{hit_test, scroll_step, Camera, Viewport};
-use browser_runtime::{ops, BrowserState, LuaHost, Request};
+use browser_runtime::bookmarks::bookmarks_path;
+use browser_runtime::{address, ops, BrowserState, Bookmarks, LuaHost, Request};
 use engine::EngineController;
 use gpui::{
     div, img, prelude::*, px, relative, size, App, Application, Bounds, Context, CursorStyle,
@@ -152,8 +154,9 @@ enum Overlay {
     None,
     /// Address/search prompt with the current editable text. `fresh` marks a
     /// just-prefilled address bar: the first edit replaces it, matching the
-    /// select-all behavior of a real one.
-    Prompt { text: String, fresh: bool },
+    /// select-all behavior of a real one. `selected` is the highlighted
+    /// bookmark suggestion (none until an arrow key picks one).
+    Prompt { text: String, fresh: bool, selected: Option<usize> },
     /// Command palette with filter text and a highlighted row (moved by
     /// arrows / scroll wheel).
     Palette { text: String, selected: usize },
@@ -393,6 +396,10 @@ impl Shell {
             settings: settings_page::SettingsPage::default(),
         };
         shell.reload_lua(cx);
+        match Bookmarks::load(&bookmarks_path()) {
+            Ok(b) => shell.state.bookmarks = b,
+            Err(e) => shell.toast(format!("bookmarks: {e}")),
+        }
         shell.ensure_first_page(cx);
 
         // Event-driven frame pump: awaits browser_core::wakeslot::frame_wake().
@@ -427,7 +434,7 @@ impl Shell {
 
     fn ensure_first_page(&mut self, cx: &mut Context<Self>) {
         if self.state.strip.pages.is_empty() {
-            let home = self.config.behavior.home_page.clone();
+            let home = self.resolve_address(&self.config.behavior.home_page);
             let id = self.state.add_page(&home, &self.viewport);
             let mut fx = ops::Effects::default();
             fx.spawn.push((id, home));
@@ -623,6 +630,11 @@ impl Shell {
         for (id, muted) in fx.mute.drain(..) {
             self.engine.set_muted(id, muted);
         }
+        if std::mem::take(&mut fx.bookmarks_changed) {
+            if let Err(e) = self.state.bookmarks.save(&bookmarks_path()) {
+                self.toast(format!("bookmarks: {e}"));
+            }
+        }
         if let Some(text) = fx.toast.take() {
             self.toast(text);
         }
@@ -659,12 +671,19 @@ impl Shell {
             return;
         }
 
+        // Every navigation request, whatever its source (prompt, Lua, agent),
+        // is typed text until the resolver says otherwise.
+        let req = match req {
+            Request::Navigate(text) => Request::Navigate(self.resolve_address(&text)),
+            other => other,
+        };
+
         let vp = self.viewport;
         let mut fx = ops::Effects::default();
         ops::apply(&mut self.state, &vp, req, &mut fx);
 
         if let Some(prefill) = fx.prompt_open.take() {
-            self.overlay = Overlay::Prompt { text: prefill, fresh: true };
+            self.overlay = Overlay::Prompt { text: prefill, fresh: true, selected: None };
         }
         if fx.palette_open {
             self.overlay = Overlay::Palette { text: String::new(), selected: 0 };
@@ -692,7 +711,9 @@ impl Shell {
 
     // -- prompt -------------------------------------------------------------
 
-    fn submit_prompt(&mut self, text: String, cx: &mut Context<Self>) {
+    /// Enter in the prompt: a `:command`, the highlighted bookmark
+    /// suggestion, or typed text (URL or search, see `address::resolve`).
+    fn submit_prompt(&mut self, text: String, selected: Option<usize>, cx: &mut Context<Self>) {
         self.overlay = Overlay::None;
         let trimmed = text.trim().to_string();
         if trimmed.is_empty() {
@@ -704,17 +725,13 @@ impl Shell {
             cx.notify();
             return;
         }
-        let url = if is_url(&trimmed) {
-            if trimmed.contains("://") || trimmed.starts_with("about:") || trimmed.starts_with("data:")
-            {
-                trimmed.clone()
-            } else {
-                format!("https://{trimmed}")
-            }
-        } else {
-            self.search_url(&trimmed)
-        };
-        self.dispatch(Request::Navigate(url), cx);
+        let picked = selected
+            .and_then(|i| omnibox::suggestions(&self.state.bookmarks, &trimmed).get(i).copied())
+            .map(|b| b.url.clone());
+        match picked {
+            Some(url) => self.dispatch(Request::BookmarkOpen(url), cx),
+            None => self.dispatch(Request::Navigate(trimmed), cx),
+        }
     }
 
     fn run_typed_command(&mut self, cmd: &str, cx: &mut Context<Self>) {
@@ -728,8 +745,8 @@ impl Shell {
         }
     }
 
-    fn search_url(&self, query: &str) -> String {
-        self.config.behavior.search_engine_url.replacen("{}", query, 1)
+    fn resolve_address(&self, text: &str) -> String {
+        address::resolve(text, &self.config.behavior.search_engine_url)
     }
 
     // -- per-frame pump -----------------------------------------------------
@@ -930,20 +947,27 @@ impl Shell {
             return;
         }
         match &mut self.overlay {
-            Overlay::Prompt { text, fresh, .. } => {
+            Overlay::Prompt { text, fresh, selected } => {
                 match binding.as_str() {
                     "escape" => self.overlay = Overlay::None,
                     "enter" => {
-                        let t = std::mem::take(text);
-                        self.submit_prompt(t, cx);
+                        let (t, pick) = (std::mem::take(text), *selected);
+                        self.submit_prompt(t, pick, cx);
+                    }
+                    "up" | "down" => {
+                        let rows = omnibox::suggestions(&self.state.bookmarks, text).len();
+                        let delta = if binding == "down" { 1 } else { -1 };
+                        *selected = omnibox::move_selection(*selected, delta, rows);
                     }
                     "backspace" => {
                         text.pop();
                         *fresh = false;
+                        *selected = None;
                     }
                     _ => {
                         if ks.modifiers == gpui::Modifiers::none() {
                             if let Some(c) = &ks.key_char {
+                                *selected = None;
                                 // First edit on a fresh prefill replaces it
                                 // (select-all-then-type), instead of appending
                                 // after the current URL.
@@ -954,6 +978,7 @@ impl Shell {
                             }
                         } else if ks.modifiers.control && ks.key == "v" {
                             if let Some(pasted) = cx.read_from_clipboard().and_then(|i| i.text()) {
+                                *selected = None;
                                 if std::mem::take(fresh) {
                                     text.clear();
                                 }
@@ -1019,9 +1044,9 @@ impl Shell {
     /// Insert one character into the active text overlay (prompt/palette).
     /// Submit the prompt with its current text (control-socket path).
     pub fn submit_prompt_text(&mut self, cx: &mut Context<Self>) {
-        if let Overlay::Prompt { text, .. } = &mut self.overlay {
-            let t = std::mem::take(text);
-            self.submit_prompt(t, cx);
+        if let Overlay::Prompt { text, selected, .. } = &mut self.overlay {
+            let (t, pick) = (std::mem::take(text), *selected);
+            self.submit_prompt(t, pick, cx);
         } else {
             cx.notify();
         }
@@ -1030,9 +1055,10 @@ impl Shell {
     /// Replace the prompt's contents (control-socket path). Typing into a
     /// fresh address bar replaces its prefill, so the socket does too.
     pub fn set_prompt_text(&mut self, text: &str, cx: &mut Context<Self>) {
-        if let Overlay::Prompt { text: slot, fresh, .. } = &mut self.overlay {
+        if let Overlay::Prompt { text: slot, fresh, selected } = &mut self.overlay {
             *slot = text.to_string();
             *fresh = false;
+            *selected = None;
         }
         cx.notify();
     }
@@ -1141,6 +1167,17 @@ impl Shell {
             for (name, desc) in host.command_names() {
                 if f.is_empty() || name.contains(&f) {
                     out.push((name.clone(), desc.clone()));
+                }
+            }
+        }
+        // Bookmarks appear once something is typed: `bookmark` lists them
+        // all, anything else matches title or URL. Enter runs
+        // `bookmark.open <url>` like any other palette row.
+        if !f.is_empty() {
+            for b in self.state.bookmarks.iter() {
+                let name = format!("bookmark.open {}", b.url);
+                if name.to_lowercase().contains(&f) || b.title.to_lowercase().contains(&f) {
+                    out.push((name, b.title.clone()));
                 }
             }
         }
@@ -1497,8 +1534,8 @@ impl Render for Shell {
         }
 
         match &self.overlay {
-            Overlay::Prompt { text, .. } => {
-                root = root.child(self.render_prompt(text.clone(), bar_bg, bar_text, accent));
+            Overlay::Prompt { text, selected, .. } => {
+                root = root.child(self.render_prompt(text.clone(), *selected, bar_bg, bar_text, accent));
             }
             Overlay::Palette { text, selected } => {
                 let matches = self.palette_matches(text);
@@ -1627,13 +1664,10 @@ impl Shell {
             })
             .collect::<Vec<_>>()
             .join(" ");
-        let active_url: SharedString = self
-            .state
-            .active_id()
-            .and_then(|id| self.state.strip.page(id))
-            .map(|p| truncate(&p.url, 80))
-            .unwrap_or_default()
-            .into();
+        let active_page = self.state.active_id().and_then(|id| self.state.strip.page(id));
+        let bookmarked = active_page.is_some_and(|p| self.state.bookmarks.contains(&p.url));
+        let active_url: SharedString =
+            active_page.map(|p| truncate(&p.url, 80)).unwrap_or_default().into();
         div()
             .absolute()
             .bottom(px(0.0))
@@ -1650,12 +1684,14 @@ impl Shell {
             .text_color(bar_text)
             .block_mouse_except_scroll()
             .child(div().text_color(accent).child(ws))
+            .children(bookmarked.then(|| div().text_color(accent).child("★")))
             .child(active_url)
     }
 
     fn render_prompt(
         &self,
         text: String,
+        selected: Option<usize>,
         bar_bg: gpui::Hsla,
         bar_text: gpui::Hsla,
         accent: gpui::Hsla,
@@ -1665,19 +1701,25 @@ impl Shell {
         } else {
             text.clone().into()
         };
+        let rows = omnibox::suggestions(&self.state.bookmarks, &text);
+        let list = omnibox::render(&rows, selected, bar_bg, bar_text, accent);
         div().absolute().top(px(36.0)).left(px(0.0)).right(px(0.0)).flex().justify_center().child(
             div()
                 .w(relative(0.6))
-                .px_3()
-                .py_2()
-                .rounded_md()
-                .bg(bar_bg)
-                .border_1()
-                .border_color(accent)
-                .block_mouse_except_scroll()
-                .text_size(px(14.0))
-                .text_color(if text.is_empty() { bar_text } else { accent })
-                .child(shown),
+                .child(
+                    div()
+                        .px_3()
+                        .py_2()
+                        .rounded_md()
+                        .bg(bar_bg)
+                        .border_1()
+                        .border_color(accent)
+                        .block_mouse_except_scroll()
+                        .text_size(px(14.0))
+                        .text_color(if text.is_empty() { bar_text } else { accent })
+                        .child(shown),
+                )
+                .children(list),
         )
     }
 
@@ -1751,16 +1793,6 @@ impl Shell {
 // ---------------------------------------------------------------------------
 // helpers
 // ---------------------------------------------------------------------------
-
-fn is_url(text: &str) -> bool {
-    text.starts_with("http://")
-        || text.starts_with("https://")
-        || text.starts_with("about:")
-        || text.starts_with("file://")
-        || text.starts_with("data:")
-        || text == browser_runtime::SETTINGS_URL
-        || (text.contains('.') && !text.contains(' '))
-}
 
 /// The page-bar speaker mark: a note while the page plays, struck through
 /// (and dim) when the user muted it. Nothing for a silent, unmuted page.

@@ -63,8 +63,13 @@ pub fn help_json(shell: &Shell) -> String {
         ),
         (
             "open",
-            "url",
-            "open a new page on the active workspace and focus it",
+            "url-or-query",
+            "open a new page on the active workspace and focus it; text that is not a URL is searched",
+        ),
+        (
+            "bookmarks",
+            "[query]",
+            "saved bookmarks (newest first), optionally filtered by title/URL; open one with exec bookmark.open",
         ),
         ("scroll_to", "id|url-substr", "center the strip on a page (instant)"),
         (
@@ -155,6 +160,7 @@ pub fn agent_state_json(shell: &Shell) -> String {
                 "audio": { "playing": p.audio.playing, "muted": p.audio.muted },
                 "webview": shell.engine.has_view(p.id),
                 "loading": shell.state.slot(p.id).map(|s| s.loading).unwrap_or(false),
+                "bookmarked": shell.state.bookmarks.contains(&p.url),
                 "geometry": geo(p.id),
             })
         })
@@ -360,6 +366,13 @@ fn page_geometry(shell: &Shell, sel: &str) -> Result<Value, String> {
     }))
 }
 
+/// Saved bookmarks, or the ones matching `query`.
+fn bookmarks(shell: &Shell, query: &str) -> Value {
+    let all = shell.state.bookmarks.iter().collect::<Vec<_>>();
+    let shown = if query.trim().is_empty() { all } else { shell.state.bookmarks.search(query) };
+    json!({ "ok": true, "bookmarks": shown })
+}
+
 /// Open a new page on the active workspace and focus it: `page.new_beside`
 /// + prompt submit fused into one round trip.
 fn open_url(
@@ -462,7 +475,7 @@ pub fn handle(
 ) -> Option<String> {
     let reply = match cmd {
         "help" | "get_state" | "page_geometry" | "click" | "type" | "key" | "wheel"
-        | "screenshot" | "open" | "scroll_to" | "overlay" | "toast" | "config.get" | "mute"
+        | "screenshot" | "open" | "bookmarks" | "scroll_to" | "overlay" | "toast" | "config.get" | "mute"
         | "settings.get" | "settings.set" => {
             dispatch(shell, cmd, arg, cx)
         }
@@ -526,6 +539,7 @@ fn dispatch(
         }
         "screenshot" => screenshot(shell, arg),
         "open" => open_url(shell, arg, cx),
+        "bookmarks" => Ok(bookmarks(shell, arg)),
         "scroll_to" => scroll_to(shell, arg),
         "mute" => mute(shell, arg, cx),
         "overlay" => overlay(shell, arg, cx),

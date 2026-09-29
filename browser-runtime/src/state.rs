@@ -3,6 +3,7 @@
 //! The UI renders from this state; ops mutate it. Webviews live beside the
 //! logical strip entries and are keyed by page id.
 
+use crate::Bookmarks;
 use browser_core::{Page, PageId, Strip, WorkspaceId, DEFAULT_GAP, DEFAULT_PAGE_FRACTION};
 use browser_layout::{scroll_to_active, scroll_to_page, ScrollOffset, Viewport};
 use std::collections::HashMap;
@@ -27,6 +28,7 @@ pub struct BrowserState {
     pub quit_requested: bool,
     /// Page widths `page.width_preset` cycles through (viewport shares).
     pub width_presets: Vec<f32>,
+    pub bookmarks: Bookmarks,
 }
 
 impl Default for BrowserState {
@@ -38,6 +40,7 @@ impl Default for BrowserState {
             overview_open: false,
             quit_requested: false,
             width_presets: Vec::new(),
+            bookmarks: Bookmarks::default(),
         }
     }
 }

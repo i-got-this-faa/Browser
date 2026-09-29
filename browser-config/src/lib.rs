@@ -162,6 +162,7 @@ pub fn default_keys() -> Vec<Keybind> {
         kb("ctrl+r", "page.reload"),
         kb("ctrl+shift+r", "page.reload_bypass_cache"),
         kb("ctrl+k", "focus.url"),
+        kb("ctrl+d", "bookmark.toggle"),
         kb("ctrl+pagedown", "focus.down"),
         kb("ctrl+pageup", "focus.up"),
         kb("ctrl+u", "focus.down"),

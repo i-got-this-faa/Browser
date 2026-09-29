@@ -31,7 +31,7 @@ browser.lua ──load──▶ LuaHost ──Request──▶ ops::apply ──
 | `browser-core` | `Page`/`Workspace`/`Strip` model: insert-beside, move, close, neighbor-focus. Pages never resize each other. | new |
 | `browser-layout` | Pure viewport math: centering, smooth scroll step, per-frame geometries, focus factor. | new |
 | `browser-config` | Parse `browser.lua` into typed `Config`; hot-reload watcher; default keybindings. | new |
-| `browser-runtime` | `LuaHost` (mlua, `send`+`serialize`), `Request` catalog, `BrowserState`, ops, snapshot/events bridge. | new |
+| `browser-runtime` | `LuaHost` (mlua, `send`+`serialize`), `Request` catalog, `BrowserState`, ops, snapshot/events bridge, `address::resolve` (the one URL-or-search rule) and the `bookmarks` store. | new |
 | `webview-cdp` | `WebView` trait + frozen CDP test harness: raw TCP/websocket to a real Chromium. Screencast frames, input dispatch, navigation history. | new (backend targets Chromium/Helium) |
 | `webview-cef` + `cef-sys` | The real content backend: CEF via a small C shim. Raw BGRA frames + damage rects; no encoded images. | new |
 | `browser-ui` | GPUI shell: strip renderer, prompt, palette, page bar, status bar, overlays, key router, engine pump, control socket, agent API. | new (UI framework is Zed's GPUI, Apache-2.0) |

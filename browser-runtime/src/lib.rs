@@ -4,6 +4,8 @@
 //! return [`Request`] values (from commands, hooks, or `browser.request`)
 //! and the UI executes them against [`BrowserState`]. See `ops::apply`.
 
+pub mod address;
+pub mod bookmarks;
 pub mod bridge;
 pub mod ops;
 pub mod state;
@@ -13,6 +15,7 @@ use mlua::{Lua, LuaSerdeExt, MultiValue, Table, Value};
 use serde::{Deserialize, Serialize};
 use std::sync::{Arc, Mutex};
 
+pub use bookmarks::{Bookmark, Bookmarks};
 pub use bridge::{BrowserSnapshot, TabInfo};
 pub use mlua::Value as LuaValue;
 pub use state::{BrowserState, PageSlot};
@@ -73,10 +76,12 @@ pub enum Request {
     OpenPalette,
     /// Open (or focus) the settings page on the strip.
     SettingsOpen,
+    /// Bookmark the active page, or remove its bookmark.
+    BookmarkToggle,
+    /// Open the bookmark matching this URL, title, or URL fragment.
+    BookmarkOpen(String),
     ConfigReload,
     Quit,
-    /// User typed text into the prompt and pressed enter.
-    PromptSubmit(String),
     /// Run a registered command by name, with an optional string arg.
     RunCommand { name: String, arg: Option<String> },
     /// Evaluate a Lua chunk (REPL/palette use).
@@ -121,9 +126,10 @@ impl Request {
             Request::ScrollRight => "layout.scroll_right",
             Request::OpenPalette => "palette.open",
             Request::SettingsOpen => "settings.open",
+            Request::BookmarkToggle => "bookmark.toggle",
+            Request::BookmarkOpen(_) => "bookmark.open",
             Request::ConfigReload => "config.reload",
             Request::Quit => "app.quit",
-            Request::PromptSubmit(_) => "prompt.submit",
             Request::RunCommand { .. } => "command.run",
             Request::ExecLua(_) => "lua.exec",
         }
@@ -165,6 +171,8 @@ impl Request {
             "layout.scroll_right" => Request::ScrollRight,
             "palette.open" => Request::OpenPalette,
             "settings.open" => Request::SettingsOpen,
+            "bookmark.toggle" => Request::BookmarkToggle,
+            "bookmark.open" => Request::BookmarkOpen(arg?.to_string()),
             "config.reload" => Request::ConfigReload,
             "app.quit" => Request::Quit,
             "page.navigate" => Request::Navigate(arg?.to_string()),
@@ -209,6 +217,8 @@ impl Request {
             ("layout.scroll_right", "Scroll the strip right"),
             ("palette.open", "Open the command palette"),
             ("settings.open", "Open the settings page"),
+            ("bookmark.toggle", "Bookmark the active page, or remove its bookmark"),
+            ("bookmark.open", "Open a bookmark by URL, title, or fragment"),
             ("config.reload", "Reload browser.lua"),
             ("app.quit", "Quit the browser"),
         ]
@@ -458,6 +468,7 @@ mod tests {
             let arg = match *name {
                 "workspace.focus" | "page.to_workspace" => Some("2"),
                 "page.navigate" => Some("https://x.test"),
+                "bookmark.open" => Some("x"),
                 _ => None,
             };
             assert!(
@@ -510,6 +521,30 @@ mod tests {
                 Request::PageNewBeside,
                 Request::WorkspaceFocus(2),
                 Request::Navigate("https://example.com".into()),
+            ]
+        );
+    }
+
+    #[test]
+    fn lua_can_request_bookmark_commands() {
+        let mut out = Vec::new();
+        LuaHost::new()
+            .load_config(
+                r#"
+                browser.request { "bookmark.toggle" }
+                browser.request { "bookmark.open", "rust" }
+                browser.request { cmd = "bookmark.open", arg = "gpui" }
+                return {}
+            "#,
+                &mut out,
+            )
+            .unwrap();
+        assert_eq!(
+            out,
+            vec![
+                Request::BookmarkToggle,
+                Request::BookmarkOpen("rust".into()),
+                Request::BookmarkOpen("gpui".into()),
             ]
         );
     }
