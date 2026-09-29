@@ -27,24 +27,28 @@ to bootstrap.
 |---|---|---|
 | `help` | – | every command + descriptions + socket path |
 | `state` | – | compact snapshot (legacy shape, stable) |
-| `get_state` | – | **full snapshot**: per-page url/title/workspace/webview/loading + on-screen geometry + viewport + overlay |
-| `page_geometry` | `[id\|active\|url-substr]` | one page's on-screen rect + center |
+| `get_state` | – | **full snapshot**: per-page url/title/workspace/webview/loading/width/`bookmarked`/`maximized`/`audio` (`playing`, `muted`) + on-screen geometry (all workspaces, incl. `on_screen`) + viewport + overlay + `workspaces`, `workspace_ids`, `active_workspace_index` (1-based) + `overview` / `camera` / `animating` |
+| `page_geometry` | `[id\|active\|url-substr]` | one page's on-screen rect + center + `on_screen` |
 | `config.get` | – | theme + behavior + keybindings as JSON |
+| `settings.get` | – | every editable setting (`section`, `key`, `kind`, `value`, `overridden`), the config `path`, whether the page is `open`, its `mode` (`browse`/`edit`/`capture`), `keys_overridden`, and `load_error` (why the last reload of `browser.lua` failed, else null) |
 | `screenshot` | `[id\|active\|url-substr]` | PNG of the page's latest frame, base64 |
+| `bookmarks` | `[query]` | `{"bookmarks":[{"url","title"}]}`, newest first; `query` filters by title/URL |
 
 ### Act
 
 | cmd | arg | notes |
 |---|---|---|
-| `open` | `url` | new page on the active workspace, focused, navigated — one round trip |
+| `open` | `url-or-query` | new page on the active workspace, focused, navigated — one round trip. Typed text is resolved like the prompt: `google.com` → `https://google.com`, `localhost:3000` → `http://localhost:3000`, `rust gpui` → a search (rules in [CONFIG.md](CONFIG.md#how-typed-text-becomes-a-url)) |
 | `click` | `x y [sel] [left\|middle\|right]` | page-local coords (from `get_state` geometry); focuses the page first, exactly like a real click |
 | `type` | `text [@sel]` | keyboard-types printable text |
 | `key` | `ctrl+shift+a [@sel]` | one keystroke with modifiers |
 | `wheel` | `dx dy [sel]` | scroll wheel at page center; positive dy scrolls down |
 | `scroll_to` | `sel` | center the strip on a page (instant) |
+| `mute` | `[on\|off\|toggle] [sel]` | mute or unmute a page's audio (default: toggle the active page); replies `{muted}` |
 | `overlay` | `get\|none\|prompt\|palette` | read/close the shell overlays |
+| `settings.set` | `section.key value` | edit one `theme.*`/`behavior.*` value through the settings page's write path (validated, atomic, hot-reloaded), e.g. `behavior.gap 20`. Errors come back as `{"ok":false,"error":...}`. Keybindings are edited in the page: `exec settings.open`, then `key` |
 | `toast` | `text` | visible confirmation for humans watching |
-| `exec` | any typed command | `page.new_beside`, `focus.left`, `workspace.focus 3`, `overview.toggle`, `config.reload`, `app.quit`, … (`help` lists all) |
+| `exec` | any typed command | `page.new_beside`, `focus.left`, `focus.down`, `workspace.focus 3`, `page.to_workspace_up`, `page.width_preset`, `page.maximize`, `page.mute_toggle`, `overview.toggle`, `bookmark.toggle`, `bookmark.open rust`, `settings.open`, `config.reload`, `app.quit`, … (`help` lists all) |
 | `key` (shell) | `ctrl+k` | synthesize a real keystroke through the shell's key routing |
 | `quit` | – | close the browser |
 
@@ -52,6 +56,16 @@ to bootstrap.
 substring of url/title within the active workspace — so `click 10 10 github`
 just works in one round trip. `type`/`key` use a trailing ` @sel` separator
 (`"hello world @github"`) to stay unambiguous with free text.
+
+Geometry is in inner-viewport coordinates (below the page bar) and reflects
+the animated camera: during a workspace slide or the overview zoom it moves
+frame by frame, and `animating` turns false when it has settled. In the
+overview a page's rect is its zoomed on-screen rect while its page-local
+click coordinates (`click`) stay in the page's real size.
+
+Audio: `pages[].audio.playing` follows the engine's audio stream events (the
+`page_audio_changed` Lua hook fires on the same change); `muted` is the
+user's choice and is changed by `mute`, `exec page.mute_toggle`, or `ctrl+m`.
 
 ## Canonical agent loop
 

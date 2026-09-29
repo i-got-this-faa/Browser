@@ -11,3 +11,5 @@ serde.workspace = true
 mlua.workspace = true
 notify.workspace = true
 anyhow.workspace = true
+# preserve_order: settings fields list in struct declaration order.
+serde_json = { workspace = true, features = ["preserve_order"] }

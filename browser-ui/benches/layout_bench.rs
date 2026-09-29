@@ -5,7 +5,7 @@
 //! that show up in the trace as render.geos / frame.render time.
 
 use browser_core::{Page, Strip};
-use browser_layout::{frame_geometries, Viewport};
+use browser_layout::{stack_geometries, Camera, OverviewSpec, Viewport};
 
 fn strip_with(n: usize) -> Strip {
     let mut s = Strip::new(12.0, 0.78);
@@ -24,13 +24,15 @@ fn strip_with(n: usize) -> Strip {
 fn bench(name: &str, pages: usize, iters: u32) {
     let strip = strip_with(pages);
     let vp = Viewport { width: 1280.0, height: 720.0 };
+    let cam = Camera { ws_pos: 0.0, overview: 0.0 };
+    let spec = OverviewSpec { scale: 0.5, gap: 48.0 };
     let start = std::time::Instant::now();
     let mut sink = 0.0f32;
     for _ in 0..iters {
-        let geos = frame_geometries(&strip, &vp, 500.0, 1.0);
+        let geos = stack_geometries(&strip, &vp, 500.0, &cam, &spec);
         // Consume a value so the work is not optimized away.
-        if let Some((_, g)) = geos.last() {
-            sink += g.rel_x + g.width;
+        if let Some(g) = geos.last() {
+            sink += g.geom.rel_x + g.geom.width;
         }
         // visible() is called by strip_right/strip_left/render per frame too.
         let vis = strip.visible();
@@ -66,7 +68,7 @@ fn bench_snapshot(pages: usize, iters: u32) {
 fn main() {
     println!("== strip layout hot path ==");
     for n in [1, 4, 16, 64, 256] {
-        bench("frame_geometries + visible", n, 20_000);
+        bench("stack_geometries + visible", n, 20_000);
     }
     for n in [1, 16, 256] {
         bench_snapshot(n, 20_000);

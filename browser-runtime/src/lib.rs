@@ -4,6 +4,8 @@
 //! return [`Request`] values (from commands, hooks, or `browser.request`)
 //! and the UI executes them against [`BrowserState`]. See `ops::apply`.
 
+pub mod address;
+pub mod bookmarks;
 pub mod bridge;
 pub mod ops;
 pub mod state;
@@ -13,9 +15,14 @@ use mlua::{Lua, LuaSerdeExt, MultiValue, Table, Value};
 use serde::{Deserialize, Serialize};
 use std::sync::{Arc, Mutex};
 
+pub use bookmarks::{Bookmark, Bookmarks};
 pub use bridge::{BrowserSnapshot, TabInfo};
 pub use mlua::Value as LuaValue;
 pub use state::{BrowserState, PageSlot};
+
+/// URL of the built-in settings page. It is drawn by the shell, never given
+/// a web view; navigating to it from anywhere opens or focuses that page.
+pub const SETTINGS_URL: &str = "strip://settings";
 
 // ---------------------------------------------------------------------------
 // Requests: everything Lua (and by extension keybinds/config) may ask for
@@ -51,14 +58,30 @@ pub enum Request {
     WorkspaceFocus(u32),
     /// Send the active page to workspace n (1-based).
     PageToWorkspace(u32),
+    /// Send the active page to the workspace above / below; the view follows.
+    PageToWorkspaceUp,
+    PageToWorkspaceDown,
+    /// Mute or unmute the active page.
+    PageMuteToggle,
+    /// Cycle the active page through the configured width presets.
+    PageWidthPreset,
+    /// Shrink / grow the active page by 10% of the viewport.
+    PageWidthDecrease,
+    PageWidthIncrease,
+    /// Toggle the active page between its width and the full viewport.
+    PageMaximize,
     OverviewToggle,
     ScrollLeft,
     ScrollRight,
     OpenPalette,
+    /// Open (or focus) the settings page on the strip.
+    SettingsOpen,
+    /// Bookmark the active page, or remove its bookmark.
+    BookmarkToggle,
+    /// Open the bookmark matching this URL, title, or URL fragment.
+    BookmarkOpen(String),
     ConfigReload,
     Quit,
-    /// User typed text into the prompt and pressed enter.
-    PromptSubmit(String),
     /// Run a registered command by name, with an optional string arg.
     RunCommand { name: String, arg: Option<String> },
     /// Evaluate a Lua chunk (REPL/palette use).
@@ -91,13 +114,22 @@ impl Request {
             Request::WorkspacePrev => "workspace.prev",
             Request::WorkspaceFocus(_) => "workspace.focus",
             Request::PageToWorkspace(_) => "page.to_workspace",
+            Request::PageToWorkspaceUp => "page.to_workspace_up",
+            Request::PageToWorkspaceDown => "page.to_workspace_down",
+            Request::PageMuteToggle => "page.mute_toggle",
+            Request::PageWidthPreset => "page.width_preset",
+            Request::PageWidthDecrease => "page.width_decrease",
+            Request::PageWidthIncrease => "page.width_increase",
+            Request::PageMaximize => "page.maximize",
             Request::OverviewToggle => "overview.toggle",
             Request::ScrollLeft => "layout.scroll_left",
             Request::ScrollRight => "layout.scroll_right",
             Request::OpenPalette => "palette.open",
+            Request::SettingsOpen => "settings.open",
+            Request::BookmarkToggle => "bookmark.toggle",
+            Request::BookmarkOpen(_) => "bookmark.open",
             Request::ConfigReload => "config.reload",
             Request::Quit => "app.quit",
-            Request::PromptSubmit(_) => "prompt.submit",
             Request::RunCommand { .. } => "command.run",
             Request::ExecLua(_) => "lua.exec",
         }
@@ -127,10 +159,20 @@ impl Request {
             "workspace.prev" => Request::WorkspacePrev,
             "workspace.focus" => Request::WorkspaceFocus(arg?.parse().ok()?),
             "page.to_workspace" => Request::PageToWorkspace(arg?.parse().ok()?),
+            "page.to_workspace_up" => Request::PageToWorkspaceUp,
+            "page.to_workspace_down" => Request::PageToWorkspaceDown,
+            "page.mute_toggle" => Request::PageMuteToggle,
+            "page.width_preset" => Request::PageWidthPreset,
+            "page.width_decrease" => Request::PageWidthDecrease,
+            "page.width_increase" => Request::PageWidthIncrease,
+            "page.maximize" => Request::PageMaximize,
             "overview.toggle" => Request::OverviewToggle,
             "layout.scroll_left" => Request::ScrollLeft,
             "layout.scroll_right" => Request::ScrollRight,
             "palette.open" => Request::OpenPalette,
+            "settings.open" => Request::SettingsOpen,
+            "bookmark.toggle" => Request::BookmarkToggle,
+            "bookmark.open" => Request::BookmarkOpen(arg?.to_string()),
             "config.reload" => Request::ConfigReload,
             "app.quit" => Request::Quit,
             "page.navigate" => Request::Navigate(arg?.to_string()),
@@ -154,19 +196,29 @@ impl Request {
             ("focus.right", "Focus the page to the right"),
             ("focus.up", "Focus the workspace above"),
             ("focus.down", "Focus the workspace below"),
+            ("page.mute_toggle", "Mute or unmute the active page"),
+            ("page.width_preset", "Cycle the page width presets (1/3, 1/2, 2/3)"),
+            ("page.width_decrease", "Make the page 10% narrower"),
+            ("page.width_increase", "Make the page 10% wider"),
+            ("page.maximize", "Toggle the page between its width and full width"),
             ("page.move_left", "Move the page one slot left"),
             ("page.move_right", "Move the page one slot right"),
             ("page.next", "Focus the next page on the strip"),
             ("page.prev", "Focus the previous page on the strip"),
-            ("workspace.new", "Create a workspace"),
-            ("workspace.next", "Focus the next workspace"),
-            ("workspace.prev", "Focus the previous workspace"),
-            ("workspace.focus", "Focus workspace n"),
+            ("workspace.new", "Focus the empty workspace at the bottom"),
+            ("workspace.next", "Focus the workspace below"),
+            ("workspace.prev", "Focus the workspace above"),
+            ("workspace.focus", "Focus workspace n (counted from the top)"),
             ("page.to_workspace", "Send the page to workspace n"),
-            ("overview.toggle", "Toggle the workspace overview"),
+            ("page.to_workspace_up", "Send the page to the workspace above and follow it"),
+            ("page.to_workspace_down", "Send the page to the workspace below and follow it"),
+            ("overview.toggle", "Toggle the zoomed-out overview of all workspaces"),
             ("layout.scroll_left", "Scroll the strip left"),
             ("layout.scroll_right", "Scroll the strip right"),
             ("palette.open", "Open the command palette"),
+            ("settings.open", "Open the settings page"),
+            ("bookmark.toggle", "Bookmark the active page, or remove its bookmark"),
+            ("bookmark.open", "Open a bookmark by URL, title, or fragment"),
             ("config.reload", "Reload browser.lua"),
             ("app.quit", "Quit the browser"),
         ]
@@ -416,6 +468,7 @@ mod tests {
             let arg = match *name {
                 "workspace.focus" | "page.to_workspace" => Some("2"),
                 "page.navigate" => Some("https://x.test"),
+                "bookmark.open" => Some("x"),
                 _ => None,
             };
             assert!(
@@ -430,6 +483,22 @@ mod tests {
         );
         // Missing arg is a None, not a panic.
         assert!(Request::from_command("workspace.focus", None).is_none());
+    }
+
+    #[test]
+    fn new_commands_take_no_argument() {
+        for (name, req) in [
+            ("page.mute_toggle", Request::PageMuteToggle),
+            ("page.width_preset", Request::PageWidthPreset),
+            ("page.width_decrease", Request::PageWidthDecrease),
+            ("page.width_increase", Request::PageWidthIncrease),
+            ("page.maximize", Request::PageMaximize),
+            ("page.to_workspace_up", Request::PageToWorkspaceUp),
+            ("page.to_workspace_down", Request::PageToWorkspaceDown),
+        ] {
+            assert_eq!(Request::from_command(name, None), Some(req.clone()));
+            assert_eq!(req.name(), name);
+        }
     }
 
     #[test]
@@ -452,6 +521,30 @@ mod tests {
                 Request::PageNewBeside,
                 Request::WorkspaceFocus(2),
                 Request::Navigate("https://example.com".into()),
+            ]
+        );
+    }
+
+    #[test]
+    fn lua_can_request_bookmark_commands() {
+        let mut out = Vec::new();
+        LuaHost::new()
+            .load_config(
+                r#"
+                browser.request { "bookmark.toggle" }
+                browser.request { "bookmark.open", "rust" }
+                browser.request { cmd = "bookmark.open", arg = "gpui" }
+                return {}
+            "#,
+                &mut out,
+            )
+            .unwrap();
+        assert_eq!(
+            out,
+            vec![
+                Request::BookmarkToggle,
+                Request::BookmarkOpen("rust".into()),
+                Request::BookmarkOpen("gpui".into()),
             ]
         );
     }
@@ -525,6 +618,8 @@ mod tests {
                 title: "t".into(),
                 workspace: 1,
                 active: true,
+                audio_playing: false,
+                muted: false,
             }],
             active_workspace: 1,
         })

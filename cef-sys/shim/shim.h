@@ -21,6 +21,7 @@ enum {
   CEF_EV_CLOSED = 6,
   CEF_EV_DMABUF = 7,      // native dmabuf frame delivered
   CEF_EV_CURSOR = 8,      // cursor shape changed (cef_cursor_type_t)
+  CEF_EV_AUDIO = 9,       // page started (audio_playing=1) / stopped (0) streaming audio
 };
 
 typedef struct {
@@ -34,6 +35,7 @@ typedef struct {
   int32_t nrects;
   int32_t loading;          // CEF_EV_LOADING: 1 = loading, 0 = done
   int32_t cursor_type;      // CEF_EV_CURSOR: cef_cursor_type_t enum value
+  int32_t audio_playing;    // CEF_EV_AUDIO: 1 = at least one audio stream is live
   // CEF_EV_TITLE / CEF_EV_URL: UTF-8, valid only during the sink call.
   const char *str;
   // CEF_EV_DMABUF:
@@ -87,6 +89,8 @@ void cef_view_resize(void *view, int32_t w, int32_t h);
 void cef_view_focus(void *view, int focus);
 // Hidden pages must not composite (DoD); CEF stops producing frames.
 void cef_view_hidden(void *view, int hidden);
+// Mute / unmute the page's audio output (CefBrowserHost::SetAudioMuted).
+void cef_view_set_muted(void *view, int muted);
 
 // Mouse: kind 0=move 1=down 2=up; button 0=left 1=middle 2=right.
 void cef_view_mouse(void *view, int kind, int button, int x, int y,
@@ -102,8 +106,12 @@ void cef_view_key(void *view, int type, int windows_key_code,
 // Native Wayland subsurface presentation (zero-copy dmabuf import)
 int cef_wayland_init(void *wl_display, void *wl_parent_surface);
 void cef_view_attach_wayland(void *view);
+// x/y/w/h: where the page shows on the window (already clipped to the area it
+// may draw in). u0,v0,u1,v1: the part of the page that shows, as 0..1 shares
+// of its width/height (0,0,1,1 = all of it).
 void cef_view_set_geometry(void *view, int32_t x, int32_t y, int32_t w, int32_t h,
-                           int32_t visible, int32_t has_overlay);
+                           int32_t visible, int32_t has_overlay,
+                           float u0, float v0, float u1, float v1);
 int cef_view_get_screenshot(void *view, uint8_t **out_buf, int32_t *out_w, int32_t *out_h, size_t *out_size);
 
 // Frame rate control (refresh rate matching, e.g. 144Hz)

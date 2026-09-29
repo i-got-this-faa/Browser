@@ -16,7 +16,7 @@
 //! JSON reply line back.
 
 use crate::Shell;
-use browser_layout::{frame_geometries, scroll_to_page};
+use browser_layout::scroll_to_page;
 use serde_json::{json, Value};
 
 /// Every command the control socket understands: name, arg format, and what
@@ -63,10 +63,20 @@ pub fn help_json(shell: &Shell) -> String {
         ),
         (
             "open",
-            "url",
-            "open a new page on the active workspace and focus it",
+            "url-or-query",
+            "open a new page on the active workspace and focus it; text that is not a URL is searched",
+        ),
+        (
+            "bookmarks",
+            "[query]",
+            "saved bookmarks (newest first), optionally filtered by title/URL; open one with exec bookmark.open",
         ),
         ("scroll_to", "id|url-substr", "center the strip on a page (instant)"),
+        (
+            "mute",
+            "[on|off|toggle] [id|active|url-substr]",
+            "mute or unmute a page's audio (default: toggle the active page)",
+        ),
         (
             "overlay",
             "get|none|prompt|palette",
@@ -81,6 +91,16 @@ pub fn help_json(shell: &Shell) -> String {
             "config.get",
             "-",
             "theme + behavior + keybindings as JSON (what browser.lua set)",
+        ),
+        (
+            "settings.get",
+            "-",
+            "every editable setting: value, kind, whether the settings block overrides it, last error",
+        ),
+        (
+            "settings.set",
+            "section.key value",
+            "edit one theme/behavior value in browser.lua's settings block (hot-reloads)",
         ),
         ("quit", "-", "close the browser"),
     ];
@@ -106,18 +126,21 @@ pub fn help_json(shell: &Shell) -> String {
 pub fn agent_state_json(shell: &Shell) -> String {
     let active = shell.state.active_id();
     let vp = shell.viewport;
-    let geos = overview_geos(shell);
+    let geos = shell.page_geos();
     let geo = |id: u64| -> Option<Value> {
-        geos.iter().find(|(gid, _)| *gid == id).map(|(_, g)| {
+        geos.iter().find(|p| p.id == id).map(|p| {
+            let g = p.geom;
             json!({
                 "x": g.rel_x,
                 "y": g.top,
                 "w": g.width,
                 "h": g.height,
                 "center": [g.rel_x + g.width / 2.0, g.top + g.height / 2.0],
+                "on_screen": g.on_screen(&vp),
             })
         })
     };
+    let strip = &shell.state.strip;
     let pages: Vec<Value> = shell
         .state
         .strip
@@ -129,10 +152,15 @@ pub fn agent_state_json(shell: &Shell) -> String {
                 "url": p.url,
                 "title": p.title,
                 "workspace": p.workspace,
+                "workspace_index": strip.workspace_index(p.workspace).map(|i| i + 1),
                 "active": Some(p.id) == active,
-                "visible": p.workspace == shell.state.strip.active_workspace,
+                "visible": p.workspace == strip.active_workspace,
+                "width": p.width,
+                "maximized": p.restore_width.is_some(),
+                "audio": { "playing": p.audio.playing, "muted": p.audio.muted },
                 "webview": shell.engine.has_view(p.id),
                 "loading": shell.state.slot(p.id).map(|s| s.loading).unwrap_or(false),
+                "bookmarked": shell.state.bookmarks.contains(&p.url),
                 "geometry": geo(p.id),
             })
         })
@@ -141,27 +169,18 @@ pub fn agent_state_json(shell: &Shell) -> String {
         "ok": true,
         "active": active,
         "active_workspace": shell.state.strip.active_workspace,
-        "workspaces": shell.state.strip.workspaces.len(),
+        "workspaces": strip.workspaces.len(),
+        "workspace_ids": strip.workspaces.iter().map(|w| w.id).collect::<Vec<_>>(),
+        "active_workspace_index": strip.workspace_index(strip.active_workspace).map(|i| i + 1),
         "scroll": shell.state.scroll as f64,
         "overview": shell.state.overview_open,
+        "camera": { "workspace": shell.camera.ws_pos, "overview": shell.camera.overview },
+        "animating": shell.camera_moving() || shell.scroll_target.is_some(),
         "overlay": shell.overlay_kind(),
         "viewport": { "w": vp.width, "h": vp.height },
         "pages": pages,
     })
     .to_string()
-}
-
-/// Overview zoom: the whole strip shrinks around the viewport center.
-const OVERVIEW_SCALE: f32 = 0.55;
-
-/// Per-page on-screen geometry at the shell's current scroll/overview state.
-fn overview_geos(shell: &Shell) -> Vec<(u64, browser_layout::PageGeometry)> {
-    frame_geometries(
-        &shell.state.strip,
-        &shell.viewport,
-        shell.state.scroll,
-        if shell.state.overview_open { OVERVIEW_SCALE } else { 1.0 },
-    )
 }
 
 /// Resolve an agent-supplied page selector: numeric id, "active", or a
@@ -329,10 +348,12 @@ fn screenshot(shell: &Shell, sel: &str) -> Result<Value, String> {
 /// One page's on-screen geometry.
 fn page_geometry(shell: &Shell, sel: &str) -> Result<Value, String> {
     let id = resolve_id(shell, sel).ok_or("no page")?;
-    let (_, g) = overview_geos(shell)
+    let g = shell
+        .page_geos()
         .into_iter()
-        .find(|(gid, _)| *gid == id)
-        .ok_or("page has no geometry (hidden workspace?)")?;
+        .find(|p| p.id == id)
+        .ok_or("page has no geometry")?
+        .geom;
     Ok(json!({
         "ok": true,
         "page": id,
@@ -341,7 +362,15 @@ fn page_geometry(shell: &Shell, sel: &str) -> Result<Value, String> {
         "w": g.width,
         "h": g.height,
         "center": [g.rel_x + g.width / 2.0, g.top + g.height / 2.0],
+        "on_screen": g.on_screen(&shell.viewport),
     }))
+}
+
+/// Saved bookmarks, or the ones matching `query`.
+fn bookmarks(shell: &Shell, query: &str) -> Value {
+    let all = shell.state.bookmarks.iter().collect::<Vec<_>>();
+    let shown = if query.trim().is_empty() { all } else { shell.state.bookmarks.search(query) };
+    json!({ "ok": true, "bookmarks": shown })
 }
 
 /// Open a new page on the active workspace and focus it: `page.new_beside`
@@ -364,6 +393,28 @@ fn open_url(
         "page": active,
         "spawned": shell.state.strip.pages.len() > before,
     }))
+}
+
+/// Mute or unmute one page: the same engine call `page.mute_toggle` makes,
+/// but for any page, not only the active one.
+fn mute(shell: &mut Shell, arg: &str, cx: &mut gpui::Context<Shell>) -> Result<Value, String> {
+    let mut it = arg.split_whitespace();
+    let mode = it.next().unwrap_or("toggle");
+    let id = resolve_id(shell, it.next().unwrap_or("active")).ok_or("no page")?;
+    let was = shell.state.strip.page(id).ok_or("no page")?.audio.muted;
+    let want = match mode {
+        "toggle" => !was,
+        "on" => true,
+        "off" => false,
+        other => return Err(format!("mute: on|off|toggle, got {other:?}")),
+    };
+    if want != was {
+        if let Some(muted) = shell.state.toggle_muted(id) {
+            shell.engine.set_muted(id, muted);
+        }
+        cx.notify();
+    }
+    Ok(json!({ "ok": true, "page": id, "muted": want }))
 }
 
 fn scroll_to(shell: &mut Shell, sel: &str) -> Result<Value, String> {
@@ -424,7 +475,8 @@ pub fn handle(
 ) -> Option<String> {
     let reply = match cmd {
         "help" | "get_state" | "page_geometry" | "click" | "type" | "key" | "wheel"
-        | "screenshot" | "open" | "scroll_to" | "overlay" | "toast" | "config.get" => {
+        | "screenshot" | "open" | "bookmarks" | "scroll_to" | "overlay" | "toast" | "config.get" | "mute"
+        | "settings.get" | "settings.set" => {
             dispatch(shell, cmd, arg, cx)
         }
         _ => return None,
@@ -445,6 +497,8 @@ fn dispatch(
         "help" => Ok(serde_json::from_str(&help_json(shell)).unwrap_or_default()),
         "get_state" => Ok(serde_json::from_str(&agent_state_json(shell)).unwrap_or_default()),
         "config.get" => Ok(serde_json::from_str(&config_json(shell)).unwrap_or_default()),
+        "settings.get" => Ok(shell.settings_json()),
+        "settings.set" => shell.settings_set(arg),
         "page_geometry" => page_geometry(shell, arg),
         "click" => {
             let mut it = arg.split_whitespace();
@@ -485,7 +539,9 @@ fn dispatch(
         }
         "screenshot" => screenshot(shell, arg),
         "open" => open_url(shell, arg, cx),
+        "bookmarks" => Ok(bookmarks(shell, arg)),
         "scroll_to" => scroll_to(shell, arg),
+        "mute" => mute(shell, arg, cx),
         "overlay" => overlay(shell, arg, cx),
         "toast" => {
             shell.toast(arg.to_string());

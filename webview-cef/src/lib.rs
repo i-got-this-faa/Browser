@@ -152,16 +152,22 @@ impl CefWebView {
         }
     }
 
-    pub fn set_geometry(&self, x: i32, y: i32, w: i32, h: i32, visible: bool, has_overlay: bool) {
+    /// Place the page on the window. `crop` is the visible part as
+    /// `[u0, v0, u1, v1]` shares of the page (`[0.0, 0.0, 1.0, 1.0]` = all).
+    pub fn set_geometry(&self, rect: [i32; 4], visible: bool, has_overlay: bool, crop: [f32; 4]) {
         unsafe {
             ffi::cef_view_set_geometry(
                 self.view,
-                x,
-                y,
-                w,
-                h,
+                rect[0],
+                rect[1],
+                rect[2],
+                rect[3],
                 if visible { 1 } else { 0 },
                 if has_overlay { 1 } else { 0 },
+                crop[0],
+                crop[1],
+                crop[2],
+                crop[3],
             );
         }
     }
@@ -250,6 +256,9 @@ impl WebView for CefWebView {
             // Background pages must not composite (DoD) -> WasHidden.
             WebViewCommand::SetHidden(h) => unsafe {
                 ffi::cef_view_hidden(self.view, h as c_int);
+            },
+            WebViewCommand::SetMuted(m) => unsafe {
+                ffi::cef_view_set_muted(self.view, m as c_int);
             },
             WebViewCommand::Mouse { x, y, kind, button, mods } => {
                 let k = match kind {
@@ -408,6 +417,12 @@ extern "C" fn sink(ev: *const ffi::CefEvent, _ud: *mut c_void) {
                 });
             } else {
                 unsafe { libc::close(ev.dmabuf_fd); }
+            }
+            browser_core::wakeslot::kick();
+        }
+        ffi::CEF_EV_AUDIO => {
+            if let Some(tx) = entry.tx.as_ref() {
+                let _ = tx.send(WebViewEvent::AudioChanged(ev.audio_playing != 0));
             }
             browser_core::wakeslot::kick();
         }

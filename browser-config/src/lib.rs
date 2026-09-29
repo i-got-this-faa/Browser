@@ -13,6 +13,8 @@ use std::path::{Path, PathBuf};
 use std::sync::mpsc::Sender;
 use std::time::Duration;
 
+pub mod settings;
+
 pub const DEFAULT_CONFIG_DIR: &str = ".config/strip-browser";
 pub const DEFAULT_CONFIG_FILE: &str = "browser.lua";
 
@@ -63,7 +65,17 @@ pub struct Behavior {
     pub show_status_bar: bool,
     /// Target display refresh rate (Hz), e.g. 144. 0 = auto-detect via Wayland.
     pub refresh_rate: u32,
+    /// Page widths `page.width_preset` cycles through, as viewport shares,
+    /// ascending.
+    pub width_presets: Vec<f32>,
+    /// Zoom of the overview (0.5 = the desktop at half size).
+    pub overview_scale: f32,
+    /// Space between workspaces in the overview, unzoomed px.
+    pub overview_gap: f32,
 }
+
+/// 1/3, 1/2, 2/3 of the viewport, like niri's default preset column widths.
+pub const DEFAULT_WIDTH_PRESETS: [f32; 3] = [1.0 / 3.0, 0.5, 2.0 / 3.0];
 
 impl Default for Behavior {
     fn default() -> Self {
@@ -76,6 +88,9 @@ impl Default for Behavior {
             show_page_bar: true,
             show_status_bar: true,
             refresh_rate: 0,
+            width_presets: DEFAULT_WIDTH_PRESETS.to_vec(),
+            overview_scale: 0.5,
+            overview_gap: 48.0,
         }
     }
 }
@@ -129,22 +144,33 @@ impl Default for Config {
 /// Default bindings. Every one of them can be replaced from browser.lua.
 pub fn default_keys() -> Vec<Keybind> {
     vec![
-        kb("ctrl+h", "focus.left"),
-        kb("ctrl+l", "focus.right"),
-        kb("ctrl+alt+h", "focus.left"),
-        kb("ctrl+alt+l", "focus.right"),
-        kb("ctrl+shift+h", "page.move_left"),
-        kb("ctrl+shift+l", "page.move_right"),
         kb("ctrl+t", "page.new"),
         kb("ctrl+shift+t", "page.new_beside"),
         kb("ctrl+w", "page.close"),
-        kb("ctrl+r", "page.reload"),
-        kb("ctrl+i", "focus.url"),
-        kb("ctrl+shift+r", "page.reload_bypass_cache"),
+        kb("ctrl+l", "focus.right"),
+        kb("ctrl+h", "focus.left"),
+        kb("ctrl+alt+l", "focus.right"),
+        kb("ctrl+alt+h", "focus.left"),
+        kb("ctrl+shift+l", "page.move_right"),
+        kb("ctrl+shift+h", "page.move_left"),
+        kb("ctrl+n", "page.next"),
+        kb("ctrl+shift+n", "page.prev"),
+        kb("ctrl+alt+n", "workspace.next"),
+        kb("ctrl+alt+shift+n", "workspace.new"),
         kb("alt+left", "page.back"),
         kb("alt+right", "page.forward"),
-        kb("ctrl+pagedown", "page.next"),
-        kb("ctrl+pageup", "page.prev"),
+        kb("ctrl+r", "page.reload"),
+        kb("ctrl+shift+r", "page.reload_bypass_cache"),
+        kb("ctrl+k", "focus.url"),
+        kb("ctrl+d", "bookmark.toggle"),
+        kb("ctrl+pagedown", "focus.down"),
+        kb("ctrl+pageup", "focus.up"),
+        kb("ctrl+u", "focus.down"),
+        kb("ctrl+i", "focus.up"),
+        kb("ctrl+shift+pagedown", "page.to_workspace_down"),
+        kb("ctrl+shift+pageup", "page.to_workspace_up"),
+        kb("ctrl+shift+u", "page.to_workspace_down"),
+        kb("ctrl+shift+i", "page.to_workspace_up"),
         kb_arg("ctrl+1", "workspace.focus", "1"),
         kb_arg("ctrl+2", "workspace.focus", "2"),
         kb_arg("ctrl+3", "workspace.focus", "3"),
@@ -153,12 +179,16 @@ pub fn default_keys() -> Vec<Keybind> {
         kb_arg("ctrl+shift+2", "page.to_workspace", "2"),
         kb_arg("ctrl+shift+3", "page.to_workspace", "3"),
         kb_arg("ctrl+shift+4", "page.to_workspace", "4"),
-        kb("ctrl+n", "workspace.new"),
-        kb("ctrl+shift+n", "workspace.next"),
+        kb("ctrl+m", "page.mute_toggle"),
+        kb("ctrl+alt+r", "page.width_preset"),
+        kb("ctrl+alt+-", "page.width_decrease"),
+        kb("ctrl+alt+=", "page.width_increase"),
+        kb("ctrl+alt+f", "page.maximize"),
         kb("ctrl+o", "overview.toggle"),
         kb("ctrl+shift+o", "overview.toggle"),
-        kb("ctrl+shift+p", "palette.open"),
         kb("ctrl+p", "palette.open"),
+        kb("ctrl+shift+p", "palette.open"),
+        kb("ctrl+,", "settings.open"),
         kb("ctrl+shift+e", "config.reload"),
         kb("ctrl+q", "app.quit"),
     ]
@@ -198,6 +228,10 @@ impl Config {
             return Err(anyhow!("browser.lua must return a table"));
         };
 
+        // Values the settings page wrote into its managed block win over the
+        // user's table; merged before parsing so clamps still apply.
+        settings::Overrides::from_lua_global(&lua)?.merge_into(&lua, &t)?;
+
         let mut cfg = Config::default();
         if let Some(theme) = nested_table(&t, "theme")? {
             cfg.theme.bg = get_str_or(&theme, "bg", &cfg.theme.bg);
@@ -221,6 +255,12 @@ impl Config {
             cfg.behavior.show_page_bar = get_bool_or(&b, "show_page_bar", cfg.behavior.show_page_bar);
             cfg.behavior.show_status_bar = get_bool_or(&b, "show_status_bar", cfg.behavior.show_status_bar);
             cfg.behavior.refresh_rate = get_num_or(&b, "refresh_rate", cfg.behavior.refresh_rate as f32).max(0.0) as u32;
+            cfg.behavior.overview_scale =
+                get_num_or(&b, "overview_scale", cfg.behavior.overview_scale).clamp(0.2, 0.9);
+            cfg.behavior.overview_gap = get_num_or(&b, "overview_gap", cfg.behavior.overview_gap).max(0.0);
+            if let Some(presets) = nested_table(&b, "width_presets")? {
+                cfg.behavior.width_presets = parse_width_presets(&presets)?;
+            }
         }
         if let Some(keys) = nested_table(&t, "keys")? {
             cfg.keys = parse_keys(&keys)?;
@@ -262,6 +302,18 @@ fn get_num_or(t: &Table, key: &str, default: f32) -> f32 {
 fn get_bool_or(t: &Table, key: &str, default: bool) -> bool {
     let v: Option<bool> = t.raw_get(key).ok().flatten();
     v.unwrap_or(default)
+}
+
+/// Preset widths must be numbers; they are clamped to 0.1..=1.0 and sorted so
+/// the cycle walks from narrow to wide. An empty list keeps the defaults.
+fn parse_width_presets(presets: &Table) -> Result<Vec<f32>> {
+    let mut out = Vec::new();
+    for v in presets.sequence_values::<f64>() {
+        out.push((v.context("width_presets entries must be numbers")? as f32).clamp(0.1, 1.0));
+    }
+    out.sort_by(f32::total_cmp);
+    out.dedup();
+    Ok(if out.is_empty() { DEFAULT_WIDTH_PRESETS.to_vec() } else { out })
 }
 
 fn parse_keys(keys: &Table) -> Result<Vec<Keybind>> {
@@ -355,6 +407,13 @@ pub fn watch_config(path: PathBuf, tx: Sender<()>) -> Result<RecommendedWatcher>
         std::fs::create_dir_all(parent).ok();
         watcher.watch(parent, notify::RecursiveMode::NonRecursive)?;
     }
+    // A symlinked config (dotfile repos) changes in the link target's
+    // directory, which the watch above never sees; watch that one too.
+    if let Some(target_dir) = std::fs::canonicalize(&path).ok().and_then(|p| p.parent().map(Path::to_path_buf)) {
+        if path.parent() != Some(target_dir.as_path()) {
+            watcher.watch(&target_dir, notify::RecursiveMode::NonRecursive)?;
+        }
+    }
     Ok(watcher)
 }
 
@@ -425,6 +484,23 @@ mod tests {
         assert_eq!(cfg.hooks[0].event, "page_created");
         assert!(cfg.hook("page_created").is_some());
         assert!(cfg.hook("nothing").is_none());
+    }
+
+    #[test]
+    fn overview_and_width_presets_parse_and_clamp() {
+        let d = Config::parse("return {}").unwrap().behavior;
+        assert_eq!(d.width_presets, DEFAULT_WIDTH_PRESETS.to_vec());
+        assert_eq!((d.overview_scale, d.overview_gap), (0.5, 48.0));
+        let b = Config::parse(
+            "return { behavior = { width_presets = { 0.9, 0.25, 0.25, 5 }, overview_scale = 0.01, overview_gap = -3 } }",
+        )
+        .unwrap()
+        .behavior;
+        assert_eq!(b.width_presets, vec![0.25, 0.9, 1.0], "sorted, deduped, clamped");
+        assert_eq!((b.overview_scale, b.overview_gap), (0.2, 0.0));
+        let empty = Config::parse("return { behavior = { width_presets = {} } }").unwrap().behavior;
+        assert_eq!(empty.width_presets, DEFAULT_WIDTH_PRESETS.to_vec());
+        assert!(Config::parse("return { behavior = { width_presets = { 'x' } } }").is_err());
     }
 
     #[test]

@@ -18,6 +18,7 @@ pub const CEF_EV_LOADING: u32 = 5;
 pub const CEF_EV_CLOSED: u32 = 6;
 pub const CEF_EV_DMABUF: u32 = 7;
 pub const CEF_EV_CURSOR: u32 = 8;
+pub const CEF_EV_AUDIO: u32 = 9;
 
 #[repr(C)]
 #[derive(Copy, Clone)]
@@ -30,6 +31,7 @@ pub struct CefEvent {
     pub nrects: c_int,
     pub loading: c_int,
     pub cursor_type: c_int,
+    pub audio_playing: c_int,
     pub str_: *const c_char,
     pub dmabuf_fd: c_int,
     pub stride: u32,
@@ -65,6 +67,7 @@ unsafe extern "C" {
     pub fn cef_view_resize(view: *mut c_void, w: i32, h: i32);
     pub fn cef_view_focus(view: *mut c_void, focus: c_int);
     pub fn cef_view_hidden(view: *mut c_void, hidden: c_int);
+    pub fn cef_view_set_muted(view: *mut c_void, muted: c_int);
 
     /// kind: 0=move 1=down 2=up; button: 0=left 1=middle 2=right
     pub fn cef_view_mouse(
@@ -99,6 +102,10 @@ unsafe extern "C" {
         h: i32,
         visible: c_int,
         has_overlay: c_int,
+        u0: f32,
+        v0: f32,
+        u1: f32,
+        v1: f32,
     );
     pub fn cef_view_get_screenshot(
         view: *mut c_void,
