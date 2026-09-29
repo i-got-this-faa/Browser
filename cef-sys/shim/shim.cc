@@ -1,17 +1,20 @@
 // shim.cc — the embedding boundary. A thin C++ layer over CEF's content API
 // exposing a small C ABI to Rust. The shell owns a genuine CefBrowser per
-// page; frames cross as raw BGRA pixels + damage rects. No PNG, no JPEG, no
-// base64, no Page.captureScreenshot anywhere.
+// page.
 //
 // Threading: CEF runs its own UI thread (multi_threaded_message_loop). Every
 // browser touch from Rust is wrapped in a CefPostTask(TID_UI). Events flow to
 // the single Rust sink from arbitrary CEF threads; the sink only enqueues.
 //
-// Frame path (the whole point): OnPaint copies CEF's BGRA buffer into THIS
-// view's stable heap buffer (dirty-row bounded memcpy, buffer reused across
-// frames), coalescing damage into the union rect. Rust locks the buffer,
-// patches only the damage rects into its render image, unlocks. One texture
-// in gpui, zero allocations per frame.
+// Frame paths:
+// - Wayland (default): OnAcceleratedPaint attaches CEF's dmabuf to a per-page
+//   wl_subsurface; niri composites it. wl_buffers are pooled per dmabuf inode.
+//   CEF documents that the dmabuf returns to its pool when the callback
+//   returns, so the compositor can read a buffer CEF is already reusing; a
+//   client-owned copy would close that gap.
+// - Fallback: OnPaint copies CEF's BGRA buffer into the view's stable heap
+//   buffer (dirty-row bounded memcpy) and Rust patches the damage rects into
+//   one gpui texture.
 
 #include "shim.h"
 
@@ -579,7 +582,6 @@ struct RenderHandler : public CefRenderHandler {
             wl_buffer_add_listener(buf, &pooled_buffer_listener, new_pb.get());
             pb = new_pb.get();
             view->buffer_pool[bkey] = std::move(new_pb);
-            view->prune_buffer_pool();
           }
         }
 
@@ -597,6 +599,10 @@ struct RenderHandler : public CefRenderHandler {
           view->request_frame_callback_locked(nullptr);
           wl_surface_commit(view->child_surface);
           view->current_buffer = pb->buffer;
+          // Prune only now: a fresh entry has last_used_frame 0 until it is
+          // attached, so pruning earlier evicted the buffer we were about to
+          // attach (use-after-free in wl_surface_attach).
+          view->prune_buffer_pool();
 
           if (view->last_fd >= 0) close(view->last_fd);
           view->last_fd = dup(info.planes[0].fd);
@@ -752,12 +758,12 @@ class StripApp : public CefApp, public CefBrowserProcessHandler {
                                      CefRefPtr<CefCommandLine> cl) override {
     // Privacy/hardening posture (Helium-family defaults; prebuilt binaries
     // carry no Helium source patches — see decisions.tsv).
+    // Smooth scrolling is Chromium's default on Linux; the shell forwards raw
+    // wheel deltas and lets Chromium run the only scroll animation.
     cl->AppendSwitchWithValue("force-color-profile", "srgb");
-    cl->AppendSwitch("disable-features=Translate,BackForwardCache");
+    cl->AppendSwitchWithValue("disable-features", "Translate,BackForwardCache");
     cl->AppendSwitch("mute-audio");
     cl->AppendSwitch("disable-background-timer-throttling");
-    cl->AppendSwitch("enable-smooth-scrolling");
-    cl->AppendSwitchWithValue("enable-features", "SmoothScrolling");
   }
 
   void OnScheduleMessagePumpWork(int64_t) override {

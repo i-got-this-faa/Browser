@@ -267,7 +267,8 @@ impl EngineController {
         }
     }
 
-    /// Forward a scroll event at page-local coordinates.
+    /// Forward a wheel event at page-local coordinates. Deltas follow
+    /// `WebViewCommand::Scroll`: positive `dy` scrolls down.
     pub fn scroll(&self, page_id: u64, x: i32, y: i32, dx: i32, dy: i32) {
         let shared = self.shared.lock().unwrap();
         if let Some(view) = shared.views.get(&page_id) {

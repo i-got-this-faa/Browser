@@ -87,7 +87,7 @@ print("Testing mouse motion & click...")
 click_res = send("click", "200 200 active left")
 print(f"Click response: {click_res}")
 
-print("Testing kinetic wheel...")
+print("Testing wheel...")
 wheel_res = send("wheel", "0 -80 active")
 print(f"Wheel response: {wheel_res}")
 

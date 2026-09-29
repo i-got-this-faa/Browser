@@ -188,9 +188,10 @@ impl CefWebView {
         unsafe { ffi::cef_view_mouse(self.view, kind, button, x, y, count, mods as i32) };
     }
 
-    /// Fast-path wheel dispatch without intermediate enum allocation.
+    /// Wheel in the `WebViewCommand::Scroll` convention (positive `dy` scrolls
+    /// down). CEF's wheel is inverted, so both axes flip here and only here.
     pub fn wheel_fast(&self, x: i32, y: i32, dx: i32, dy: i32) {
-        unsafe { ffi::cef_view_wheel(self.view, x, y, dx, dy) };
+        unsafe { ffi::cef_view_wheel(self.view, x, y, -dx, -dy) };
     }
 
     /// Fast-path key dispatch without intermediate enum allocation.
@@ -268,9 +269,7 @@ impl WebView for CefWebView {
                 if mods.meta { m |= 1 << 7; }
                 unsafe { ffi::cef_view_mouse(self.view, k, b, x, y, 1, m) };
             }
-            WebViewCommand::Scroll { x, y, dx, dy } => unsafe {
-                ffi::cef_view_wheel(self.view, x, y, dx, dy);
-            },
+            WebViewCommand::Scroll { x, y, dx, dy } => self.wheel_fast(x, y, dx, dy),
             WebViewCommand::Keys(keys) => {
                 for k in &keys {
                     dispatch_key(self.view, k);
