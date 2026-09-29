@@ -40,6 +40,9 @@ pub enum WebViewCommand {
     /// Background pages must not composite (DoD). No-op on the frozen CDP
     /// harness; CEF maps this to CefBrowserHost::WasHidden.
     SetHidden(bool),
+    /// Mute or unmute the page's audio. No-op on the frozen CDP harness; CEF
+    /// maps this to CefBrowserHost::SetAudioMuted.
+    SetMuted(bool),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -197,6 +200,8 @@ pub enum WebViewEvent {
     UrlChanged(String),
     Closed,
     CursorChanged(WebCursor),
+    /// The page started (true) or stopped (false) streaming audio.
+    AudioChanged(bool),
     Dmabuf {
         fd: i32,
         width: u32,
@@ -846,7 +851,7 @@ impl WebView for CdpWebView {
             ).map(|_| ()),
             // Frozen harness: background compositing suppression is a CEF
             // concern; screencast only produces frames when composited anyway.
-            WebViewCommand::SetHidden(_) => Ok(()),
+            WebViewCommand::SetHidden(_) | WebViewCommand::SetMuted(_) => Ok(()),
         }
     }
 

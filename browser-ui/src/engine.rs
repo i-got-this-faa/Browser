@@ -210,6 +210,11 @@ impl EngineController {
         let _ = self.send(page_id, WebViewCommand::SetHidden(hidden));
     }
 
+    /// Mute or unmute a page. Hidden pages keep playing when not muted.
+    pub fn set_muted(&self, page_id: u64, muted: bool) {
+        let _ = self.send(page_id, WebViewCommand::SetMuted(muted));
+    }
+
     pub fn set_focus(&self, page_id: u64, focused: bool) {
         let _ = self.send(page_id, WebViewCommand::SetFocus(focused));
     }
@@ -376,10 +381,10 @@ impl EngineController {
         webview_cef::wayland_dispatch();
     }
 
-    pub fn set_geometry(&self, page_id: u64, x: i32, y: i32, w: i32, h: i32, visible: bool, has_overlay: bool) {
+    pub fn set_geometry(&self, page_id: u64, rect: [i32; 4], visible: bool, has_overlay: bool, crop: [f32; 4]) {
         let shared = self.shared.lock().unwrap();
         if let Some(PageView::Cef(v)) = shared.views.get(&page_id) {
-            v.set_geometry(x, y, w, h, visible, has_overlay);
+            v.set_geometry(rect, visible, has_overlay, crop);
         }
     }
 

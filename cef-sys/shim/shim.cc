@@ -21,6 +21,7 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <cmath>
 #include <cstring>
 #include <map>
 #include <memory>
@@ -77,6 +78,7 @@ int32_t cef_get_target_frame_rate();
 void cef_view_set_frame_rate(void* view, int32_t fps);
 
 #include "include/cef_app.h"
+#include "include/cef_audio_handler.h"
 #include "include/cef_browser.h"
 #include "include/cef_client.h"
 #include "include/cef_command_line.h"
@@ -282,6 +284,8 @@ struct View : public CefBaseRefCounted {
   std::atomic<int32_t> pending_move_y{0};
   std::atomic<uint32_t> pending_move_mods{0};
   std::atomic<uint32_t> mouse_button_modifiers{0};
+  // Live audio streams of this page (a page may run several at once).
+  std::atomic<int32_t> audio_streams{0};
 
 #ifdef STRIP_WAYLAND_DMABUF
   struct wl_surface* child_surface = nullptr;
@@ -295,6 +299,11 @@ struct View : public CefBaseRefCounted {
 
   int32_t last_x = 0, last_y = 0, last_w = 0, last_h = 0;
   bool is_visible = true;
+  // True while position/size changes are being applied together with the
+  // parent's commit (see cef_view_set_geometry).
+  bool geometry_synced = false;
+  // Visible part of the page as shares of the buffer (see cef_view_set_geometry).
+  float crop_u0 = 0, crop_v0 = 0, crop_u1 = 1, crop_v1 = 1;
   bool is_above = false;
   int last_fd = -1;
   uint64_t last_size = 0;
@@ -323,6 +332,34 @@ struct View : public CefBaseRefCounted {
   }
 
   void request_frame_callback_locked(struct wl_event_queue* queue = nullptr);
+
+#ifdef STRIP_WAYLAND_VIEWPORTER
+  // Crop the attached buffer to the visible part. The source rectangle is in
+  // buffer pixels and must lie inside the buffer the next commit carries, so
+  // this runs whenever the crop changes AND whenever a new buffer is attached.
+  void apply_crop_locked(int32_t buf_w, int32_t buf_h) {
+    if (!viewport) return;
+    const bool full = crop_u0 <= 0 && crop_v0 <= 0 && crop_u1 >= 1 && crop_v1 >= 1;
+    if (full || buf_w <= 0 || buf_h <= 0) {
+      wl_fixed_t none = wl_fixed_from_int(-1);
+      wp_viewport_set_source(viewport, none, none, none, none);
+      return;
+    }
+    // 24.8 fixed point, rounded down so the rectangle never pokes past the
+    // buffer edge (that is a protocol error, fatal for the whole client).
+    auto fx = [](float share, int32_t size) {
+      return static_cast<int32_t>(std::floor(static_cast<double>(share) * size * 256.0));
+    };
+    int32_t x0 = fx(crop_u0, buf_w), y0 = fx(crop_v0, buf_h);
+    int32_t x1 = std::min(fx(crop_u1, buf_w), buf_w * 256);
+    int32_t y1 = std::min(fx(crop_v1, buf_h), buf_h * 256);
+    x0 = std::min(x0, buf_w * 256 - 1);
+    y0 = std::min(y0, buf_h * 256 - 1);
+    x1 = std::max(x1, x0 + 1);
+    y1 = std::max(y1, y0 + 1);
+    wp_viewport_set_source(viewport, x0, y0, x1 - x0, y1 - y0);
+  }
+#endif
 
   void on_vblank_done(uint32_t) {
     CefRefPtr<CefBrowser> b;
@@ -586,18 +623,28 @@ struct RenderHandler : public CefRenderHandler {
         }
 
         if (pb && pb->buffer) {
-          pb->in_use.store(true, std::memory_order_release);
           pb->last_used_frame = ++view->frame_seq;
-          wl_surface_attach(view->child_surface, pb->buffer, 0, 0);
-          wl_surface_damage(view->child_surface, 0, 0, INT32_MAX, INT32_MAX);
+          // A page the shell has taken off screen (clipped away, or on another
+          // workspace) only records the frame: attaching would put it back on
+          // screen at its last place. cef_view_set_geometry re-attaches
+          // current_buffer when the page is shown again.
+          if (view->is_visible) {
+            pb->in_use.store(true, std::memory_order_release);
+            wl_surface_attach(view->child_surface, pb->buffer, 0, 0);
+            wl_surface_damage(view->child_surface, 0, 0, INT32_MAX, INT32_MAX);
 #ifdef STRIP_WAYLAND_VIEWPORTER
-          if (view->viewport && view->w > 0 && view->h > 0) {
-            wp_viewport_set_destination(view->viewport, view->w, view->h);
-          }
+            view->apply_crop_locked(static_cast<int32_t>(buf_w), static_cast<int32_t>(buf_h));
+            // Until set_geometry has chosen a size, show the buffer at the
+            // webview's size. After that the destination is the shell's (the
+            // overview shows pages scaled), so frames must not reset it.
+            if (view->viewport && view->last_w == 0 && view->w > 0 && view->h > 0) {
+              wp_viewport_set_destination(view->viewport, view->w, view->h);
+            }
 #endif
-          // Align next frame deadline with Wayland vblank
-          view->request_frame_callback_locked(nullptr);
-          wl_surface_commit(view->child_surface);
+            // Align next frame deadline with Wayland vblank
+            view->request_frame_callback_locked(nullptr);
+            wl_surface_commit(view->child_surface);
+          }
           view->current_buffer = pb->buffer;
           // Prune only now: a fresh entry has last_used_frame 0 until it is
           // attached, so pruning earlier evicted the buffer we were about to
@@ -655,6 +702,46 @@ struct DisplayHandler : public CefDisplayHandler {
   ViewRef view;
  private:
   IMPLEMENT_REFCOUNTING(DisplayHandler);
+};
+
+// CEF 154 has no "page is audible" callback; the audio handler's stream
+// lifecycle is the only signal. We never read the PCM (OnAudioStreamPacket is
+// empty): Chromium keeps playing the page through the system output while
+// this handler runs, and hidden pages keep their streams (WasHidden does not
+// stop audio), so the indicator stays right for background pages.
+struct AudioHandler : public CefAudioHandler {
+  explicit AudioHandler(ViewRef v) : view(std::move(v)) {}
+
+  bool GetAudioParameters(CefRefPtr<CefBrowser>, CefAudioParameters&) override {
+    return true;
+  }
+  void OnAudioStreamStarted(CefRefPtr<CefBrowser>, const CefAudioParameters&,
+                            int) override {
+    if (view->audio_streams.fetch_add(1) == 0) emit_audio(true);
+  }
+  void OnAudioStreamPacket(CefRefPtr<CefBrowser>, const float**, int,
+                           int64_t) override {}
+  void OnAudioStreamStopped(CefRefPtr<CefBrowser>) override {
+    int32_t n = view->audio_streams.load();
+    while (n > 0 && !view->audio_streams.compare_exchange_weak(n, n - 1)) {
+    }
+    if (n == 1) emit_audio(false);
+  }
+  void OnAudioStreamError(CefRefPtr<CefBrowser>, const CefString&) override {}
+
+  void emit_audio(bool playing) {
+    cef_sink_fn fn = g_sink.load(std::memory_order_acquire);
+    if (!fn) return;
+    cef_event_t ev{};
+    ev.kind = CEF_EV_AUDIO;
+    ev.view_id = view->id;
+    ev.audio_playing = playing ? 1 : 0;
+    fn(&ev, g_sink_ud.load(std::memory_order_relaxed));
+  }
+
+  ViewRef view;
+ private:
+  IMPLEMENT_REFCOUNTING(AudioHandler);
 };
 
 struct LoadHandler : public CefLoadHandler {
@@ -726,19 +813,21 @@ struct Client : public CefClient {
   explicit Client(ViewRef v)
       : render(new RenderHandler(v)), display(new DisplayHandler(v)),
         load(new LoadHandler(v)), lifespan(new LifeSpanHandler(v)),
-        focus(new FocusHandler(v)) {}
+        focus(new FocusHandler(v)), audio(new AudioHandler(v)) {}
 
   CefRefPtr<CefRenderHandler> GetRenderHandler() override { return render; }
   CefRefPtr<CefDisplayHandler> GetDisplayHandler() override { return display; }
   CefRefPtr<CefLoadHandler> GetLoadHandler() override { return load; }
   CefRefPtr<CefLifeSpanHandler> GetLifeSpanHandler() override { return lifespan; }
   CefRefPtr<CefFocusHandler> GetFocusHandler() override { return focus; }
+  CefRefPtr<CefAudioHandler> GetAudioHandler() override { return audio; }
 
   CefRefPtr<RenderHandler> render;
   CefRefPtr<DisplayHandler> display;
   CefRefPtr<LoadHandler> load;
   CefRefPtr<LifeSpanHandler> lifespan;
   CefRefPtr<FocusHandler> focus;
+  CefRefPtr<AudioHandler> audio;
  private:
   IMPLEMENT_REFCOUNTING(Client);
 };
@@ -762,7 +851,6 @@ class StripApp : public CefApp, public CefBrowserProcessHandler {
     // wheel deltas and lets Chromium run the only scroll animation.
     cl->AppendSwitchWithValue("force-color-profile", "srgb");
     cl->AppendSwitchWithValue("disable-features", "Translate,BackForwardCache");
-    cl->AppendSwitch("mute-audio");
     cl->AppendSwitch("disable-background-timer-throttling");
   }
 
@@ -1047,8 +1135,20 @@ void cef_view_hidden(void* view, int hidden) {
   if (!raw) return;
   ViewRef v(raw);
   CefPostTask(TID_UI, base::BindOnce([](ViewRef v, int h) {
-    if (v && v->browser) v->browser->GetHost()->WasHidden(h != 0);
+    if (!v || !v->browser) return;
+    v->browser->GetHost()->WasHidden(h != 0);
+    // A page shown again (workspace slide, overview) repaints right away.
+    if (!h) v->browser->GetHost()->Invalidate(PET_VIEW);
   }, v, hidden));
+}
+
+void cef_view_set_muted(void* view, int muted) {
+  View* raw = static_cast<View*>(view);
+  if (!raw) return;
+  ViewRef v(raw);
+  CefPostTask(TID_UI, base::BindOnce([](ViewRef v, int m) {
+    if (v && v->browser) v->browser->GetHost()->SetAudioMuted(m != 0);
+  }, v, muted));
 }
 
 void cef_view_mouse(void* view, int kind, int button, int x, int y,
@@ -1343,7 +1443,8 @@ void cef_view_attach_wayland(void* raw_view) {
 }
 
 void cef_view_set_geometry(void* raw_view, int32_t x, int32_t y, int32_t w, int32_t h,
-                           int32_t visible, int32_t has_overlay) {
+                           int32_t visible, int32_t has_overlay,
+                           float u0, float v0, float u1, float v1) {
 #ifdef STRIP_WAYLAND_DMABUF
   View* v = static_cast<View*>(raw_view);
   if (!v) return;
@@ -1364,7 +1465,19 @@ void cef_view_set_geometry(void* raw_view, int32_t x, int32_t y, int32_t w, int3
     return;
   }
 
+  const bool was_visible = v->is_visible;
   v->is_visible = true;
+  if (!was_visible && v->current_buffer) {
+    // Shown again after being detached: put the last frame back at once
+    // instead of waiting for CEF to paint a new one.
+    wl_surface_attach(v->child_surface, v->current_buffer, 0, 0);
+    wl_surface_damage(v->child_surface, 0, 0, INT32_MAX, INT32_MAX);
+#ifdef STRIP_WAYLAND_VIEWPORTER
+    // The buffer may have changed size while detached; the source rectangle
+    // must fit the buffer this commit carries.
+    v->apply_crop_locked(v->last_buf_w, v->last_buf_h);
+#endif
+  }
 
   if (has_overlay) {
     if (v->is_above) {
@@ -1378,19 +1491,51 @@ void cef_view_set_geometry(void* raw_view, int32_t x, int32_t y, int32_t w, int3
     }
   }
 
-  if (v->last_x != x || v->last_y != y) {
+  // The subsurface position is parent state, applied when the shell commits
+  // its window; the viewport size is child state, applied on the child's own
+  // commit while the subsurface is desynchronized. Landing in different
+  // frames would show a page at its new size in its old place. So while the
+  // geometry changes, run the subsurface synchronized: the child's commit is
+  // cached and applies together with the parent commit that carries the new
+  // position. Once the geometry is stable, go back to desync so CEF's frames
+  // present immediately.
+  const bool moved = v->last_x != x || v->last_y != y;
+#ifdef STRIP_WAYLAND_VIEWPORTER
+  const bool resized = v->viewport && (v->last_w != w || v->last_h != h);
+#else
+  const bool resized = false;
+#endif
+#ifdef STRIP_WAYLAND_VIEWPORTER
+  const bool recropped = v->viewport && (v->crop_u0 != u0 || v->crop_v0 != v0 ||
+                                          v->crop_u1 != u1 || v->crop_v1 != v1);
+  if (recropped) {
+    v->crop_u0 = u0; v->crop_v0 = v0; v->crop_u1 = u1; v->crop_v1 = v1;
+    v->apply_crop_locked(v->last_buf_w, v->last_buf_h);
+  }
+#else
+  const bool recropped = false;
+#endif
+  const bool changing = moved || resized || recropped;
+  if (changing && !v->geometry_synced) {
+    wl_subsurface_set_sync(v->subsurface);
+    v->geometry_synced = true;
+  }
+  if (moved) {
     wl_subsurface_set_position(v->subsurface, x, y);
     v->last_x = x;
     v->last_y = y;
   }
-
 #ifdef STRIP_WAYLAND_VIEWPORTER
-  if (v->viewport && (v->last_w != w || v->last_h != h)) {
+  if (resized) {
     wp_viewport_set_destination(v->viewport, w, h);
     v->last_w = w;
     v->last_h = h;
   }
 #endif
+  if (!changing && v->geometry_synced) {
+    wl_subsurface_set_desync(v->subsurface);
+    v->geometry_synced = false;
+  }
 
   wl_surface_commit(v->child_surface);
   wl_display_dispatch_queue_pending(g_wl.display, g_wl.queue);
