@@ -9,13 +9,14 @@
 mod agent;
 mod control;
 mod engine;
+mod overview;
 mod trace;
 
 use anyhow::{Context as _, Result};
 use browser_config::{config_path, ensure_default_config, watch_config, Config, WatcherHandle};
 use browser_core::{perf_event, perf_span};
 use std::collections::HashMap;
-use browser_layout::{frame_geometries, scroll_step, Viewport};
+use browser_layout::{hit_test, scroll_step, Camera, Viewport};
 use browser_runtime::{ops, BrowserState, LuaHost, Request};
 use engine::EngineController;
 use gpui::{
@@ -206,6 +207,13 @@ struct Shell {
     /// Sub-pixel wheel remainder per page (see `wheel_pixels`).
     wheel_carry: HashMap<u64, Point<f32>>,
     last_mouse_page: Option<u64>,
+    /// Workspace slide and overview zoom, eased toward the active workspace
+    /// and `overview_open` (see overview.rs).
+    camera: Camera,
+    /// Wheel remainder while the overview is open (see `overview::wheel_steps`).
+    overview_wheel: f32,
+    /// Page that last received engine focus.
+    last_focus: Option<u64>,
 }
 
 /// One page's render surface. `bgra` is the LIVE CPU-side frame: the pump
@@ -376,6 +384,9 @@ impl Shell {
             page_cursors: HashMap::new(),
             wheel_carry: HashMap::new(),
             last_mouse_page: None,
+            camera: Camera { ws_pos: 0.0, overview: 0.0 },
+            overview_wheel: 0.0,
+            last_focus: None,
         };
         shell.reload_lua(cx);
         shell.ensure_first_page(cx);
@@ -447,6 +458,7 @@ impl Shell {
                     Ok(cfg) => {
                         self.state
                             .apply_behavior(cfg.behavior.gap, cfg.behavior.page_width_fraction);
+                        self.state.width_presets = cfg.behavior.width_presets.clone();
                         if cfg.behavior.refresh_rate > 0 {
                             self.engine.set_target_frame_rate(cfg.behavior.refresh_rate);
                         }
@@ -534,6 +546,8 @@ impl Shell {
                     title: p.title.clone(),
                     workspace: p.workspace,
                     active: self.state.strip.active_page == Some(p.id),
+                    audio_playing: p.audio.playing,
+                    muted: p.audio.muted,
                 })
                 .collect(),
             active_workspace: self.state.strip.active_workspace,
@@ -598,6 +612,9 @@ impl Shell {
             self.engine.close_page(id);
             self.forget_page(id, cx);
         }
+        for (id, muted) in fx.mute.drain(..) {
+            self.engine.set_muted(id, muted);
+        }
         if let Some(text) = fx.toast.take() {
             self.toast(text);
         }
@@ -658,6 +675,10 @@ impl Shell {
         if fx.scroll_recenter {
             self.scroll_target = Some(browser_layout::scroll_to_active(&self.state.strip, &vp));
         }
+        self.sync_engine_focus();
+        // Key-driven dispatches start animations (scroll, workspace slide,
+        // overview zoom); the pump sleeps until kicked.
+        browser_core::wakeslot::kick();
         cx.notify();
     }
 
@@ -738,6 +759,10 @@ impl Shell {
             dirty = true;
         }
 
+        if self.step_camera() {
+            dirty = true;
+        }
+
         // Toast lifetime is wall-clock now: the pump only runs when kicked,
         // so frame-counting would freeze the countdown while idle.
         if let Overlay::Toast { .. } = &self.overlay {
@@ -757,7 +782,7 @@ impl Shell {
     /// while a smooth scroll is in flight, or while a toast is counting down.
     /// None means fully idle — the pump then waits for the next kick.
     fn animation_deadline(&self) -> Option<std::time::Instant> {
-        if self.scroll_target.is_some() || self.toast_deadline.is_some() {
+        if self.scroll_target.is_some() || self.toast_deadline.is_some() || self.camera_moving() {
             Some(std::time::Instant::now())
         } else {
             None
@@ -821,6 +846,13 @@ impl Shell {
                     self.state.set_url(page_id, &url);
                     let payload = serde_json::json!({ "id": page_id, "url": url });
                     self.fire_hook("page_navigated", Some(payload), cx);
+                    dirty = true;
+                }
+                webview_cdp::WebViewEvent::AudioChanged(playing) => {
+                    perf_event!("event.audio", "page" => page_id);
+                    self.state.set_audio_playing(page_id, playing);
+                    let payload = serde_json::json!({ "id": page_id, "playing": playing });
+                    self.fire_hook("page_audio_changed", Some(payload), cx);
                     dirty = true;
                 }
                 webview_cdp::WebViewEvent::CursorChanged(cur) => {
@@ -926,6 +958,18 @@ impl Shell {
                 return;
             }
             _ => {}
+        }
+
+        // Overview: navigation keys first; unbound keys are swallowed so
+        // typing never reaches a page the user cannot see up close.
+        if self.state.overview_open {
+            if let Some(req) = overview::key_request(&binding) {
+                self.dispatch(req, cx);
+                return;
+            }
+            if !self.config.keys.iter().any(|k| k.key == binding) {
+                return;
+            }
         }
 
         // Normal mode: config keybindings.
@@ -1104,40 +1148,18 @@ impl Shell {
         if self.config.behavior.show_status_bar { STATUS_BAR_H } else { 0.0 }
     }
 
-    /// Overview zoom: the whole strip shrinks around the viewport center.
-    /// Same constant the agent API reports geometry with, so agent clicks
-    /// land where the renderer draws.
-    const OVERVIEW_SCALE: f32 = 0.55;
-
-    /// Per-page on-screen geometry at the current scroll/overview state.
-    /// One pass feeds hit-testing, webview resize, and the element tree.
-    fn page_geos(&self) -> Vec<(u64, browser_layout::PageGeometry)> {
-        frame_geometries(
-            &self.state.strip,
-            &self.viewport,
-            self.state.scroll,
-            if self.state.overview_open { Self::OVERVIEW_SCALE } else { 1.0 },
-        )
-    }
-
     // -- mouse --------------------------------------------------------------
 
     fn page_under(&self, pos: Point<Pixels>) -> Option<(u64, Point<Pixels>)> {
+        // Window y -> inner-viewport y (bars live above/below the inner box).
+        let (x, y) = (f32::from(pos.x), f32::from(pos.y) - self.chrome_top());
         let geos = self.page_geos();
-        for (id, g) in geos {
-            let x0 = g.rel_x;
-            let x1 = g.rel_x + g.width;
-            let y0 = g.top;
-            let y1 = g.top + g.height;
-            let px_x = f32::from(pos.x);
-            // Window y -> inner-viewport y (bars live above/below the inner box).
-            let px_y = f32::from(pos.y) - self.chrome_top();
-            if px_x >= x0 && px_x <= x1 && px_y >= y0 && px_y <= y1 {
-                let local = Point::new(px(px_x - x0), px(px_y - y0));
-                return Some((id, local));
-            }
-        }
-        None
+        let id = hit_test(&geos, x, y)?;
+        let g = geos.iter().find(|p| p.id == id)?.geom;
+        // Page-local coordinates are in the page's real size, so undo any
+        // overview zoom that is still in flight.
+        let unzoom = self.state.strip.page(id)?.width / g.width;
+        Some((id, Point::new(px((x - g.rel_x) * unzoom), px((y - g.top) * unzoom))))
     }
 
     fn focus_page(&mut self, id: u64, cx: &mut Context<Self>) {
@@ -1147,25 +1169,25 @@ impl Shell {
                 Some(browser_layout::scroll_to_page(&self.state.strip, &self.viewport, id));
             let payload = serde_json::json!({ "id": id });
             self.fire_hook("page_focused", Some(payload), cx);
-            self.sync_hidden_and_focus();
+            self.sync_engine_focus();
+            browser_core::wakeslot::kick();
         }
     }
 
-    /// Background pages must not composite (DoD): pages outside the active
-    /// workspace get WasHidden(true); the focused page gets input focus.
-    fn sync_hidden_and_focus(&mut self) {
-        let active_ws = self.state.strip.active_workspace;
-        let active = self.state.strip.active_page;
-        for page in &self.state.strip.pages {
-            let hidden = page.workspace != active_ws;
-            if self.focus_cache.get(&page.id) != Some(&hidden) {
-                self.engine.set_hidden(page.id, hidden);
-                self.focus_cache.insert(page.id, hidden);
-            }
+    /// The active page gets engine input focus and the previous one loses it.
+    /// Hidden state is separate: render() derives it from what is on screen.
+    fn sync_engine_focus(&mut self) {
+        let active = self.state.active_id();
+        if active == self.last_focus {
+            return;
         }
-        if let Some(a) = active {
-            self.engine.set_focus(a, true);
+        if let Some(old) = self.last_focus {
+            self.engine.set_focus(old, false);
         }
+        if let Some(new) = active {
+            self.engine.set_focus(new, true);
+        }
+        self.last_focus = active;
     }
 
     fn on_mouse_down(&mut self, ev: &MouseDownEvent, _window: &mut Window, cx: &mut Context<Self>) {
@@ -1210,6 +1232,9 @@ impl Shell {
     }
 
     fn on_mouse_move(&mut self, ev: &MouseMoveEvent, _window: &mut Window, cx: &mut Context<Self>) {
+        if self.state.overview_open {
+            return;
+        }
         let page = self.page_under(ev.position);
         let current_id = page.as_ref().map(|(id, _)| *id);
         if self.last_mouse_page != current_id {
@@ -1235,6 +1260,9 @@ impl Shell {
     /// only smooth-scroll animation, as in Chrome; the shell adds none, so a
     /// notch reaches the page in the same input event that produced it.
     fn on_scroll(&mut self, ev: &ScrollWheelEvent, _window: &mut Window, _cx: &mut Context<Self>) {
+        if self.state.overview_open {
+            return;
+        }
         let Some((id, local)) = self.page_under(ev.position) else {
             return;
         };
@@ -1265,6 +1293,7 @@ impl Render for Shell {
             || (new_vp.height - self.viewport.height).abs() > f32::EPSILON
         {
             self.viewport = new_vp;
+            self.state.strip.refit_maximized(new_vp.width);
             // Re-center the active page when the window resizes.
             if let Some(active) = self.state.active_id() {
                 self.scroll_target =
@@ -1280,27 +1309,29 @@ impl Render for Shell {
             "pages" => geos.len(),
             "us" => __t_geo.elapsed().as_micros() as u64);
 
-        // Webview viewports must track their on-screen frame size so CDP
-        // screenshots match what is displayed. Checked per render, but each
-        // view is only resized when its rounded frame size actually changes
-        // (per-frame resize churned the engine's compositor: see perf audit).
-        // In overview the frames are shrunken; resize webviews to match.
+        // Webview viewports track the page's real size, whatever the overview
+        // zoom shows: the picture is scaled on screen, never re-rendered.
+        // Checked per render, but each view is only resized when its rounded
+        // size actually changes (per-frame resize churned the engine's
+        // compositor: see perf audit). Every workspace's pages are sized, so
+        // the overview shows them right.
         let mut resize_count = 0usize;
-        for (id, g) in &geos {
-            let size = (g.width.round() as u32, g.height.round() as u32);
+        for page in &self.state.strip.pages {
+            let id = page.id;
+            let size = (page.width.round() as u32, self.viewport.height.round() as u32);
             if size.0 == 0 || size.1 == 0 {
                 continue;
             }
-            if self.view_sizes.get(id) == Some(&size) {
+            if self.view_sizes.get(&id) == Some(&size) {
                 continue;
             }
             // Pages without a webview yet (spawned empty, never navigated)
             // would fail the resize and retry every render.
-            if !self.engine.has_view(*id) {
+            if !self.engine.has_view(id) {
                 continue;
             }
-            if self.engine.resize(*id, size.0, size.1).is_ok() {
-                self.view_sizes.insert(*id, size);
+            if self.engine.resize(id, size.0, size.1).is_ok() {
+                self.view_sizes.insert(id, size);
             }
             resize_count += 1;
         }
@@ -1310,18 +1341,38 @@ impl Render for Shell {
 
         let chrome_top = self.chrome_top();
         let has_overlay = !matches!(self.overlay, Overlay::None);
-        if self.wayland_active {
-            let visible_ids: std::collections::HashSet<u64> = geos.iter().map(|(id, _)| *id).collect();
-            for (id, g) in &geos {
-                let x = g.rel_x.round() as i32;
-                let y = (g.top + chrome_top).round() as i32;
-                let w = g.width.round() as i32;
-                let h = g.height.round() as i32;
-                self.engine.set_geometry(*id, x, y, w, h, true, has_overlay);
+        let active_ws = self.state.strip.active_workspace;
+        // A page off the active workspace only shows (and composites) while
+        // the workspace slide or the overview brings it into view; otherwise
+        // it is hidden, like niri windows on another workspace. Hidden pages
+        // keep running, so their audio keeps playing.
+        for sp in &geos {
+            let shown = sp.workspace == active_ws || sp.geom.on_screen(&self.viewport);
+            if self.focus_cache.get(&sp.id) != Some(&!shown) {
+                self.engine.set_hidden(sp.id, !shown);
+                self.focus_cache.insert(sp.id, !shown);
             }
-            for p in &self.state.strip.pages {
-                if !visible_ids.contains(&p.id) {
-                    self.engine.set_geometry(p.id, 0, 0, 0, 0, false, has_overlay);
+        }
+        if self.wayland_active {
+            // Pages are subsurfaces above the whole window, so each is clipped
+            // to the inner viewport: the bars stay visible over the overview's
+            // pages that reach past its edges.
+            let inner = browser_layout::Rect {
+                x: 0.0,
+                y: chrome_top,
+                w: self.viewport.width,
+                h: self.viewport.height,
+            };
+            for sp in &geos {
+                let g = sp.geom.rect();
+                let window = browser_layout::Rect { y: g.y + chrome_top, ..g };
+                match browser_layout::clip(window, inner) {
+                    Some(c) => {
+                        let r = c.rect;
+                        let rect = [r.x.round() as i32, r.y.round() as i32, r.w.round() as i32, r.h.round() as i32];
+                        self.engine.set_geometry(sp.id, rect, true, has_overlay, [c.u0, c.v0, c.u1, c.v1]);
+                    }
+                    None => self.engine.set_geometry(sp.id, [0; 4], false, has_overlay, [0.0, 0.0, 1.0, 1.0]),
                 }
             }
         }
@@ -1333,8 +1384,13 @@ impl Render for Shell {
         let border_focus = hex(&self.config.theme.border_focus);
         let accent = hex(&self.config.theme.accent);
 
+        let backdrop = self.render_overview_backdrop(&geos);
         let mut pages = div().absolute().size_full();
-        for (id, g) in geos {
+        for sp in &geos {
+            let (id, g) = (sp.id, sp.geom);
+            if sp.workspace != active_ws && !g.on_screen(&self.viewport) {
+                continue;
+            }
             let Some(slot) = self.state.slot(id) else { continue };
             let is_active = self.state.strip.active_page == Some(id);
             let title: SharedString = if slot.page.title.is_empty() {
@@ -1402,8 +1458,14 @@ impl Render for Shell {
             .bg(bg)
             .track_focus(&self.focus)
             .key_context("Browser")
-            .on_key_down(cx.listener(Self::on_key))
-            .child(pages);
+            .on_key_down(cx.listener(Self::on_key));
+        if let Some(backdrop) = backdrop {
+            root = root.child(backdrop);
+        }
+        root = root.child(pages);
+        if self.state.overview_open {
+            root = root.child(self.render_overview_input(cx));
+        }
 
         if self.config.behavior.show_page_bar {
             root = root.child(self.render_page_bar(bar_bg, bar_text, accent, border, cx));
@@ -1497,8 +1559,12 @@ impl Shell {
                     .px_2()
                     .py_0p5()
                     .rounded_sm()
+                    .flex()
+                    .flex_row()
+                    .gap_1()
                     .text_size(px(11.0))
                     .text_color(if is_active { accent } else { bar_text })
+                    .children(audio_indicator(p.audio, accent))
                     .child(label)
                     .on_mouse_down(
                         MouseButton::Left,
@@ -1529,11 +1595,12 @@ impl Shell {
             .strip
             .workspaces
             .iter()
-            .map(|w| {
+            .enumerate()
+            .map(|(i, w)| {
                 if w.id == self.state.strip.active_workspace {
-                    format!("[{}]", w.name)
+                    format!("[{}]", i + 1)
                 } else {
-                    format!(" {}", w.name)
+                    format!(" {}", i + 1)
                 }
             })
             .collect::<Vec<_>>()
@@ -1672,6 +1739,16 @@ fn is_url(text: &str) -> bool {
         || (text.contains('.') && !text.contains(' '))
 }
 
+/// The page-bar speaker mark: a note while the page plays, struck through
+/// (and dim) when the user muted it. Nothing for a silent, unmuted page.
+fn audio_indicator(audio: browser_core::AudioState, accent: gpui::Hsla) -> Option<gpui::Div> {
+    if !audio.playing && !audio.muted {
+        return None;
+    }
+    let mark = div().child("\u{266a}");
+    Some(if audio.muted { mark.line_through().opacity(0.6) } else { mark.text_color(accent) })
+}
+
 fn truncate(s: &str, n: usize) -> String {
     if s.chars().count() <= n {
         s.to_string()
@@ -1784,6 +1861,23 @@ fn hex(s: &str) -> gpui::Hsla {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The shipped browser.lua and the built-in defaults must stay one key
+    /// set, and every bound command must exist.
+    #[test]
+    fn shipped_config_matches_the_built_in_defaults() {
+        let shipped = Config::parse(DEFAULT_LUA).expect("shipped browser.lua parses");
+        assert_eq!(shipped.keys, browser_config::default_keys());
+        assert_eq!(shipped.behavior, browser_config::Behavior::default());
+        for k in &shipped.keys {
+            assert!(
+                Request::from_command(&k.command, k.arg.as_deref().or(Some("1"))).is_some(),
+                "{} is bound to unknown command {}",
+                k.key,
+                k.command
+            );
+        }
+    }
 
     #[test]
     fn wheel_notch_is_120px_and_wheel_up_scrolls_up() {
