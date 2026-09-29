@@ -4,6 +4,7 @@
 //! side-effects (webview create/navigate/close). Keeping ops engine-free
 //! makes them testable without Chrome.
 
+use crate::bookmarks::Toggled;
 use crate::state::BrowserState;
 use crate::Request;
 use browser_layout::{scroll_step, Viewport};
@@ -29,6 +30,8 @@ pub struct Effects {
     pub palette_open: bool,
     /// Toast text.
     pub toast: Option<String>,
+    /// The bookmark list changed and must be written to disk.
+    pub bookmarks_changed: bool,
     /// The strip must re-center on the active page (focus changed, page
     /// added/closed/moved, workspace switched). Overlay-only requests (toast,
     /// prompt, palette) leave the scroll alone.
@@ -163,12 +166,16 @@ pub fn apply(state: &mut BrowserState, vp: &Viewport, req: Request, effects: &mu
             state.scroll = scroll_step(state.scroll, target, 0.35);
         }
         Request::OpenPalette => effects.palette_open = true,
+        Request::BookmarkToggle => toggle_bookmark(state, effects),
+        Request::BookmarkOpen(query) => match state.bookmarks.find(&query).map(|b| b.url.clone()) {
+            Some(url) => apply(state, vp, Request::Navigate(url), effects),
+            None => effects.toast = Some(format!("no bookmark matches `{query}`")),
+        },
         Request::ConfigReload => effects.toast = Some("config reloaded".into()),
         Request::Quit => {
             state.quit_requested = true;
             effects.quit = true;
         }
-        Request::PromptSubmit(text) => handle_prompt_submit(state, vp, text, effects),
         Request::RunCommand { name, arg } => {
             if let Some(r) = Request::from_command(&name, arg.as_deref()) {
                 apply(state, vp, r, effects);
@@ -181,43 +188,21 @@ pub fn apply(state: &mut BrowserState, vp: &Viewport, req: Request, effects: &mu
     }
 }
 
-fn handle_prompt_submit(
-    state: &mut BrowserState,
-    vp: &Viewport,
-    text: String,
-    effects: &mut Effects,
-) {
-    let text = text.trim();
-    if text.is_empty() {
+/// Bookmark the active page or drop its bookmark. Blank pages have nothing
+/// to save.
+fn toggle_bookmark(state: &mut BrowserState, effects: &mut Effects) {
+    let Some(page) = state.active_id().and_then(|id| state.strip.page(id)) else { return };
+    if page.url.is_empty() || page.url == "about:blank" {
+        effects.toast = Some("nothing to bookmark".into());
         return;
     }
-    let looks_like_url = text.starts_with("http://")
-        || text.starts_with("https://")
-        || text.starts_with("about:")
-        || text.starts_with("file://")
-        || text.starts_with("data:")
-        || (text.contains('.') && !text.contains(' '));
-    if looks_like_url {
-        let url = if text.contains("://") || text.starts_with("data:") || text.starts_with("about:")
-        {
-            text.to_string()
-        } else {
-            format!("https://{text}")
-        };
-        if let Some(id) = state.active_id() {
-            state.set_url(id, &url);
-            if let Some(slot) = state.slot_mut(id) {
-                slot.loading = true;
-            }
-            effects.navigate.push((id, url));
-        } else {
-            let id = state.add_page(&url, vp);
-            effects.spawn.push((id, url));
-        }
-    } else {
-        // Not a URL: hand it back; the UI substitutes its search engine.
-        effects.prompt_open = Some(text.to_string());
-    }
+    let (url, title) = (page.url.clone(), page.title.clone());
+    let title = if title.is_empty() { url.clone() } else { title };
+    effects.toast = Some(match state.bookmarks.toggle(&url, &title) {
+        Toggled::Added => format!("bookmarked {title}"),
+        Toggled::Removed => format!("removed bookmark {title}"),
+    });
+    effects.bookmarks_changed = true;
 }
 
 fn focus_neighbor(state: &mut BrowserState, vp: &Viewport, right: bool) {
@@ -322,19 +307,40 @@ mod tests {
     }
 
     #[test]
-    fn prompt_submit_routes_url_vs_search() {
+    fn bookmark_toggle_saves_and_removes_the_active_page() {
         let (mut s, vp) = setup();
-        s.add_page("about:blank", &vp);
+        let id = s.add_page("https://e.test/", &vp);
+        s.set_title(id, "Example");
         let mut fx = Effects::default();
-        apply(&mut s, &vp, Request::PromptSubmit("example.com".into()), &mut fx);
-        assert_eq!(fx.navigate[0].1, "https://example.com");
+        apply(&mut s, &vp, Request::BookmarkToggle, &mut fx);
+        assert!(fx.bookmarks_changed && s.bookmarks.contains("https://e.test/"));
+        assert_eq!(fx.toast.as_deref(), Some("bookmarked Example"));
         let mut fx = Effects::default();
-        apply(&mut s, &vp, Request::PromptSubmit("two words".into()), &mut fx);
-        assert_eq!(
-            fx.prompt_open.as_deref(),
-            Some("two words"),
-            "search goes back to the prompt with query preserved"
-        );
+        apply(&mut s, &vp, Request::BookmarkToggle, &mut fx);
+        assert!(fx.bookmarks_changed && !s.bookmarks.contains("https://e.test/"));
+    }
+
+    #[test]
+    fn bookmark_toggle_ignores_blank_pages() {
+        let (mut s, vp) = setup();
+        s.add_page("", &vp);
+        let mut fx = Effects::default();
+        apply(&mut s, &vp, Request::BookmarkToggle, &mut fx);
+        assert!(!fx.bookmarks_changed && s.bookmarks.iter().next().is_none());
+        assert_eq!(fx.toast.as_deref(), Some("nothing to bookmark"));
+    }
+
+    #[test]
+    fn bookmark_open_navigates_to_the_match() {
+        let (mut s, vp) = setup();
+        let id = s.add_page("https://e.test/", &vp);
+        s.bookmarks.toggle("https://rust-lang.org/", "Rust");
+        let mut fx = Effects::default();
+        apply(&mut s, &vp, Request::BookmarkOpen("rust".into()), &mut fx);
+        assert_eq!(fx.navigate, vec![(id, "https://rust-lang.org/".to_string())]);
+        let mut fx = Effects::default();
+        apply(&mut s, &vp, Request::BookmarkOpen("zzz".into()), &mut fx);
+        assert!(fx.navigate.is_empty() && fx.toast.is_some());
     }
 
     #[test]
