@@ -44,7 +44,17 @@ pub struct Effects {
 /// UI, which owns the search-engine config.
 pub fn apply(state: &mut BrowserState, vp: &Viewport, req: Request, effects: &mut Effects) {
     match req {
-        Request::Navigate(url) if url == SETTINGS_URL => open_settings(state, vp, effects),
+        Request::Navigate(url) if url == SETTINGS_URL => {
+            // The settings page has no web view, so it cannot load into the
+            // active page. A fresh blank page (new page + prompt, or agent
+            // `open`) is replaced by it instead of lingering beside it.
+            let blank = state.active_id().filter(|id| state.strip.page(*id).is_some_and(|p| p.url.is_empty()));
+            open_settings(state, vp, effects);
+            if let Some(id) = blank {
+                state.close_page(id, vp);
+                effects.close.push(id);
+            }
+        }
         Request::Navigate(url) => {
             if let Some(id) = state.active_id() {
                 state.set_url(id, &url);
@@ -326,6 +336,20 @@ mod tests {
         assert_eq!(s.strip.pages.len(), 2);
         assert!(fx.navigate.is_empty() && fx.spawn.is_empty());
         assert_eq!(Request::from_command("settings.open", None), Some(Request::SettingsOpen));
+    }
+
+    #[test]
+    fn settings_replaces_a_fresh_blank_page() {
+        let (mut s, vp) = setup();
+        let web = s.add_page("https://e.test", &vp);
+        let mut fx = Effects::default();
+        apply(&mut s, &vp, Request::PageNewBeside, &mut fx);
+        let blank = s.active_id().unwrap();
+        apply(&mut s, &vp, Request::Navigate(SETTINGS_URL.into()), &mut fx);
+        assert_eq!(fx.close, vec![blank]);
+        assert_eq!(s.strip.pages.len(), 2);
+        assert!(s.strip.page(web).is_some());
+        assert_eq!(s.strip.page(s.active_id().unwrap()).unwrap().url, SETTINGS_URL);
     }
 
     #[test]
