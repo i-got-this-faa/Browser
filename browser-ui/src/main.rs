@@ -10,6 +10,7 @@ mod agent;
 mod control;
 mod engine;
 mod overview;
+mod settings_page;
 mod trace;
 
 use anyhow::{Context as _, Result};
@@ -214,6 +215,8 @@ struct Shell {
     overview_wheel: f32,
     /// Page that last received engine focus.
     last_focus: Option<u64>,
+    /// State of the native `strip://settings` page (see settings_page.rs).
+    settings: settings_page::SettingsPage,
 }
 
 /// One page's render surface. `bgra` is the LIVE CPU-side frame: the pump
@@ -387,6 +390,7 @@ impl Shell {
             camera: Camera { ws_pos: 0.0, overview: 0.0 },
             overview_wheel: 0.0,
             last_focus: None,
+            settings: settings_page::SettingsPage::default(),
         };
         shell.reload_lua(cx);
         shell.ensure_first_page(cx);
@@ -466,12 +470,16 @@ impl Shell {
                     }
                     Err(e) => self.toast(format!("config warning: {e}")),
                 }
+                self.settings_reloaded(None);
                 for r in load_requests {
                     self.dispatch(r, cx);
                 }
                 self.fire_hook("config_reloaded", None, cx);
             }
-            Err(e) => self.toast(format!("browser.lua error: {e}")),
+            Err(e) => {
+                self.settings_reloaded(Some(e.to_string()));
+                self.toast(format!("browser.lua error: {e}"));
+            }
         }
     }
 
@@ -971,6 +979,11 @@ impl Shell {
                 return;
             }
         }
+        // The settings page owns the keyboard while it is the active page
+        // (unbound chords still fall through to the config bindings below).
+        if self.settings_route_key(&binding, ks, cx) {
+            return;
+        }
 
         // Normal mode: config keybindings.
         let hit = self.config.keys.iter().find(|k| k.key == binding).map(|k| {
@@ -1259,13 +1272,19 @@ impl Shell {
     /// Wheel and touchpad input go straight to the page. Chromium runs the
     /// only smooth-scroll animation, as in Chrome; the shell adds none, so a
     /// notch reaches the page in the same input event that produced it.
-    fn on_scroll(&mut self, ev: &ScrollWheelEvent, _window: &mut Window, _cx: &mut Context<Self>) {
+    fn on_scroll(&mut self, ev: &ScrollWheelEvent, _window: &mut Window, cx: &mut Context<Self>) {
         if self.state.overview_open {
             return;
         }
         let Some((id, local)) = self.page_under(ev.position) else {
             return;
         };
+        if self.is_settings_page(id) {
+            // GPUI's y is positive for wheel-up; the list offset grows downward.
+            self.settings.scroll_by(-f32::from(ev.delta.pixel_delta(px(WHEEL_LINE_PX)).y));
+            cx.notify();
+            return;
+        }
         let carry = self.wheel_carry.entry(id).or_default();
         let (dx, dy) = wheel_pixels(carry, ev.delta.pixel_delta(px(WHEEL_LINE_PX)));
         if dx != 0 || dy != 0 {
@@ -1423,7 +1442,10 @@ impl Render for Shell {
                 .on_mouse_move(cx.listener(Self::on_mouse_move))
                 .on_scroll_wheel(cx.listener(Self::on_scroll));
 
-            if !self.wayland_active {
+            if slot.page.url == browser_runtime::SETTINGS_URL {
+                // Native page: no web view, drawn by the shell.
+                frame = frame.child(self.render_settings(g.height, cx));
+            } else if !self.wayland_active {
                 frame = frame.bg(bar_bg);
                 let tex = {
                     let surface = self.surfaces.get_mut(&id);
@@ -1736,6 +1758,7 @@ fn is_url(text: &str) -> bool {
         || text.starts_with("about:")
         || text.starts_with("file://")
         || text.starts_with("data:")
+        || text == browser_runtime::SETTINGS_URL
         || (text.contains('.') && !text.contains(' '))
 }
 

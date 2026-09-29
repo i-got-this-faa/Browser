@@ -17,6 +17,10 @@ pub use bridge::{BrowserSnapshot, TabInfo};
 pub use mlua::Value as LuaValue;
 pub use state::{BrowserState, PageSlot};
 
+/// URL of the built-in settings page. It is drawn by the shell, never given
+/// a web view; navigating to it from anywhere opens or focuses that page.
+pub const SETTINGS_URL: &str = "strip://settings";
+
 // ---------------------------------------------------------------------------
 // Requests: everything Lua (and by extension keybinds/config) may ask for
 // ---------------------------------------------------------------------------
@@ -67,6 +71,8 @@ pub enum Request {
     ScrollLeft,
     ScrollRight,
     OpenPalette,
+    /// Open (or focus) the settings page on the strip.
+    SettingsOpen,
     ConfigReload,
     Quit,
     /// User typed text into the prompt and pressed enter.
@@ -114,6 +120,7 @@ impl Request {
             Request::ScrollLeft => "layout.scroll_left",
             Request::ScrollRight => "layout.scroll_right",
             Request::OpenPalette => "palette.open",
+            Request::SettingsOpen => "settings.open",
             Request::ConfigReload => "config.reload",
             Request::Quit => "app.quit",
             Request::PromptSubmit(_) => "prompt.submit",
@@ -157,6 +164,7 @@ impl Request {
             "layout.scroll_left" => Request::ScrollLeft,
             "layout.scroll_right" => Request::ScrollRight,
             "palette.open" => Request::OpenPalette,
+            "settings.open" => Request::SettingsOpen,
             "config.reload" => Request::ConfigReload,
             "app.quit" => Request::Quit,
             "page.navigate" => Request::Navigate(arg?.to_string()),
@@ -200,6 +208,7 @@ impl Request {
             ("layout.scroll_left", "Scroll the strip left"),
             ("layout.scroll_right", "Scroll the strip right"),
             ("palette.open", "Open the command palette"),
+            ("settings.open", "Open the settings page"),
             ("config.reload", "Reload browser.lua"),
             ("app.quit", "Quit the browser"),
         ]

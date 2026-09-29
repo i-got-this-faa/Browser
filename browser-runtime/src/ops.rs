@@ -5,7 +5,7 @@
 //! makes them testable without Chrome.
 
 use crate::state::BrowserState;
-use crate::Request;
+use crate::{Request, SETTINGS_URL};
 use browser_layout::{next_preset_width, scroll_step, stepped_width, Viewport};
 
 /// Outcome of one op: what the caller must do to the engine/UI afterwards.
@@ -41,6 +41,7 @@ pub struct Effects {
 /// UI, which owns the search-engine config.
 pub fn apply(state: &mut BrowserState, vp: &Viewport, req: Request, effects: &mut Effects) {
     match req {
+        Request::Navigate(url) if url == SETTINGS_URL => open_settings(state, vp, effects),
         Request::Navigate(url) => {
             if let Some(id) = state.active_id() {
                 state.set_url(id, &url);
@@ -170,6 +171,7 @@ pub fn apply(state: &mut BrowserState, vp: &Viewport, req: Request, effects: &mu
             state.scroll = scroll_step(state.scroll, target, 0.35);
         }
         Request::OpenPalette => effects.palette_open = true,
+        Request::SettingsOpen => open_settings(state, vp, effects),
         Request::ConfigReload => effects.toast = Some("config reloaded".into()),
         Request::Quit => {
             state.quit_requested = true;
@@ -203,6 +205,7 @@ fn handle_prompt_submit(
         || text.starts_with("about:")
         || text.starts_with("file://")
         || text.starts_with("data:")
+        || text == SETTINGS_URL
         || (text.contains('.') && !text.contains(' '));
     if looks_like_url {
         let url = if text.contains("://") || text.starts_with("data:") || text.starts_with("about:")
@@ -211,6 +214,10 @@ fn handle_prompt_submit(
         } else {
             format!("https://{text}")
         };
+        if url == SETTINGS_URL {
+            open_settings(state, vp, effects);
+            return;
+        }
         if let Some(id) = state.active_id() {
             state.set_url(id, &url);
             if let Some(slot) = state.slot_mut(id) {
@@ -244,6 +251,26 @@ fn resize_active(state: &mut BrowserState, effects: &mut Effects, pick: impl FnO
         state.strip.resize_page(id, next);
         effects.scroll_recenter = true;
     }
+}
+
+/// Focus the settings page, creating it beside the active page if it is not
+/// open. It has no web view: nothing is spawned.
+fn open_settings(state: &mut BrowserState, vp: &Viewport, effects: &mut Effects) {
+    let existing = state.strip.pages.iter().find(|p| p.url == SETTINGS_URL).map(|p| (p.id, p.workspace));
+    match existing {
+        Some((id, ws)) => {
+            state.focus_workspace(ws, vp);
+            state.focus_page(id, vp);
+        }
+        None => {
+            let id = state.add_page(SETTINGS_URL, vp);
+            state.set_title(id, "Settings");
+            if let Some(slot) = state.slot_mut(id) {
+                slot.loading = false;
+            }
+        }
+    }
+    effects.scroll_recenter = true;
 }
 
 fn focus_neighbor(state: &mut BrowserState, vp: &Viewport, right: bool) {
@@ -296,6 +323,28 @@ mod tests {
         apply(&mut s, &vp, Request::Navigate("https://e.test".into()), &mut fx);
         assert_eq!(fx.navigate, vec![(id, "https://e.test".to_string())]);
         assert_eq!(s.strip.page(id).unwrap().url, "https://e.test");
+    }
+
+    #[test]
+    fn settings_open_creates_one_native_page_and_refocuses_it() {
+        let (mut s, vp) = setup();
+        let web = s.add_page("https://a.test", &vp);
+        let mut fx = Effects::default();
+        apply(&mut s, &vp, Request::SettingsOpen, &mut fx);
+        let settings = s.active_id().unwrap();
+        assert_ne!(settings, web);
+        assert_eq!(s.strip.page(settings).unwrap().url, SETTINGS_URL);
+        assert!(fx.spawn.is_empty(), "the settings page has no web view");
+        assert!(!s.slot(settings).unwrap().loading);
+
+        // Opening again (command, navigation, or prompt) focuses, never duplicates.
+        s.focus_page(web, &vp);
+        apply(&mut s, &vp, Request::Navigate(SETTINGS_URL.into()), &mut fx);
+        assert_eq!(s.active_id(), Some(settings));
+        apply(&mut s, &vp, Request::PromptSubmit("strip://settings".into()), &mut fx);
+        assert_eq!(s.strip.pages.len(), 2);
+        assert!(fx.navigate.is_empty() && fx.spawn.is_empty());
+        assert_eq!(Request::from_command("settings.open", None), Some(Request::SettingsOpen));
     }
 
     #[test]

@@ -13,6 +13,8 @@ use std::path::{Path, PathBuf};
 use std::sync::mpsc::Sender;
 use std::time::Duration;
 
+pub mod settings;
+
 pub const DEFAULT_CONFIG_DIR: &str = ".config/strip-browser";
 pub const DEFAULT_CONFIG_FILE: &str = "browser.lua";
 
@@ -185,6 +187,7 @@ pub fn default_keys() -> Vec<Keybind> {
         kb("ctrl+shift+o", "overview.toggle"),
         kb("ctrl+p", "palette.open"),
         kb("ctrl+shift+p", "palette.open"),
+        kb("ctrl+,", "settings.open"),
         kb("ctrl+shift+e", "config.reload"),
         kb("ctrl+q", "app.quit"),
     ]
@@ -223,6 +226,10 @@ impl Config {
         let Value::Table(t) = value else {
             return Err(anyhow!("browser.lua must return a table"));
         };
+
+        // Values the settings page wrote into its managed block win over the
+        // user's table; merged before parsing so clamps still apply.
+        settings::Overrides::from_lua_global(&lua)?.merge_into(&lua, &t)?;
 
         let mut cfg = Config::default();
         if let Some(theme) = nested_table(&t, "theme")? {
@@ -398,6 +405,13 @@ pub fn watch_config(path: PathBuf, tx: Sender<()>) -> Result<RecommendedWatcher>
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).ok();
         watcher.watch(parent, notify::RecursiveMode::NonRecursive)?;
+    }
+    // A symlinked config (dotfile repos) changes in the link target's
+    // directory, which the watch above never sees; watch that one too.
+    if let Some(target_dir) = std::fs::canonicalize(&path).ok().and_then(|p| p.parent().map(Path::to_path_buf)) {
+        if path.parent() != Some(target_dir.as_path()) {
+            watcher.watch(&target_dir, notify::RecursiveMode::NonRecursive)?;
+        }
     }
     Ok(watcher)
 }
