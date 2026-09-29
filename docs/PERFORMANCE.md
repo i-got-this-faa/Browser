@@ -134,3 +134,41 @@ cargo test --workspace
 See also `docs/AGENT_API.md`: the agent control surface that rides on the
 same event-driven socket (every command kicks the pump, so replies are
 computed immediately on an idle shell).
+
+## Round 3: wheel latency vs Helium (2026-09-29)
+
+**Method.** Headless stack: weston (GL, 144 Hz) hosting cage, hosting the
+browser. Input comes from a virtual-keyboard/virtual-pointer client with a
+CLOCK_REALTIME stamp just before the flush. The page records handler times and
+`scroll`/`scrollY` against `performance.timeOrigin`. Baseline is Helium 0.18.1.1
+(Chromium 154) on the same page.
+
+**Finding.** The shell turned each wheel notch into a velocity. A kinetic loop
+then sent it as about 21 small wheel events over later pump ticks, and
+Chromium's own smooth scroll animated each of them. On an idle page the pump
+never woke, so a notch did not scroll at all.
+
+**Fix.** `on_scroll` sends each GPUI wheel event straight to the page.
+Chromium runs the only animation, as in Chrome. The sub-pixel remainder of a
+touchpad delta carries into the next event.
+
+| metric (mean) | Helium | Strip before | Strip after |
+|---|---|---|---|
+| wheel notch → first scroll | 14.5 ms | 28.9 ms | 14.0 ms |
+| wheel notch → settled | 188 ms | 341 ms | 186–188 ms |
+| wheel events per notch | 1 | 21 | 1 |
+| 10-notch flick distance | 1200 px | 874 px | 1200 px |
+| notch on an idle page scrolls | 60/60 | 0/60 | 60/60 |
+| key → handler | 0.37 ms | 0.51 ms | 0.49 ms |
+
+**Still open (measured, not fixed).** Key or mouse input to pixels at the
+compositor output is about one 144 Hz frame slower than Helium (8.8 ms vs
+1.8 ms). CEF OSR delivers frames through viz's `FrameSinkVideoCapturer` (see
+the coredump stacks below). After input on a static page, Strip also repaints
+the output at 144 fps for about 1.3 s.
+
+**Crash fixed in the same round.** Two segfaults in `wl_surface_attach` inside
+`OnAcceleratedPaint`. `prune_buffer_pool()` ran right after a new wl_buffer
+entered the pool. The new entry still had `last_used_frame == 0`, so it was the
+oldest and was freed before being attached. The prune now runs after the
+attach.

@@ -76,6 +76,7 @@ unsafe extern "C" {
         click_count: c_int,
         modifiers: c_int,
     );
+    /// Wheel in pixels, CEF convention: positive dy scrolls up.
     pub fn cef_view_wheel(view: *mut c_void, x: c_int, y: c_int, dx: c_int, dy: c_int);
     /// type: cef_key_event_type_t (0=RAWKEYDOWN 1=KEYDOWN 2=KEYUP 3=CHAR);
     /// mods: CEF EVENTFLAG bits; ch16: character for KEYEVENT_CHAR.
